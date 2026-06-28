@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   INNOPOLIS DESIGN SYSTEM — Design Tokens
+   A cool, engineering-grade palette built around a signature teal.
+   Dark-first, with a fully tuned light theme.
+   ========================================================================== */
+
+@layer base {
+  :root {
+    /* Radius */
+    --radius: 0.625rem;
+
+    /* ---- LIGHT THEME ---- */
+    --background: 210 30% 98%;
+    --foreground: 213 27% 12%;
+
+    --surface: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --surface-sunken: 210 28% 96%;
+    --surface-overlay: 0 0% 100%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 213 27% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 27% 12%;
+
+    --primary: 174 78% 32%;
+    --primary-foreground: 0 0% 100%;
+    --primary-muted: 174 60% 92%;
+
+    --secondary: 210 24% 94%;
+    --secondary-foreground: 213 27% 18%;
+
+    --muted: 210 24% 95%;
+    --muted-foreground: 213 12% 42%;
+
+    --accent: 210 24% 93%;
+    --accent-foreground: 213 27% 18%;
+
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 33 92% 48%;
+    --warning-foreground: 0 0% 100%;
+    --info: 212 90% 50%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 213 18% 89%;
+    --border-strong: 213 16% 80%;
+    --input: 213 18% 88%;
+    --ring: 174 78% 36%;
+
+    --shadow-color: 213 40% 30%;
+  }
+
+  .dark {
+    /* ---- DARK THEME ---- */
+    --background: 213 28% 7%;
+    --foreground: 210 16% 93%;
+
+    --surface: 213 24% 9%;
+    --surface-raised: 213 20% 12%;
+    --surface-sunken: 214 30% 5%;
+    --surface-overlay: 213 20% 13%;
+
+    --card: 213 23% 10%;
+    --card-foreground: 210 16% 93%;
+
+    --popover: 213 22% 11%;
+    --popover-foreground: 210 16% 93%;
+
+    --primary: 172 68% 44%;
+    --primary-foreground: 200 50% 6%;
+    --primary-muted: 172 40% 18%;
+
+    --secondary: 213 18% 15%;
+    --secondary-foreground: 210 16% 90%;
+
+    --muted: 213 18% 15%;
+    --muted-foreground: 212 12% 58%;
+
+    --accent: 213 18% 16%;
+    --accent-foreground: 210 16% 93%;
+
+    --destructive: 0 68% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 54% 46%;
+    --success-foreground: 200 50% 6%;
+    --warning: 38 92% 56%;
+    --warning-foreground: 30 50% 8%;
+    --info: 210 90% 62%;
+    --info-foreground: 210 50% 8%;
+
+    --border: 213 16% 17%;
+    --border-strong: 213 14% 26%;
+    --input: 213 16% 19%;
+    --ring: 172 68% 44%;
+
+    --shadow-color: 214 60% 1%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    overflow: hidden; /* desktop app — panels manage their own scroll */
+  }
+
+  /* Numeric / data columns read better tabular */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.28);
+  }
+
+  /* Custom scrollbars — thin, unobtrusive */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.22);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.40);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Focus ring discipline */
+  :focus-visible {
+    outline: none;
+  }
+}
+
+@layer components {
+  /* Glass surfaces — used for toolbars, overlays, command palette */
+  .glass {
+    background: hsl(var(--surface-overlay) / 0.72);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
+
+  .glass-strong {
+    background: hsl(var(--surface-overlay) / 0.88);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+  }
+
+  /* Subtle hairline that adapts to theme */
+  .hairline {
+    @apply border-border;
+  }
+
+  /* Skeleton shimmer block */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted/60;
+  }
+  .skeleton::after {
+    @apply absolute inset-0;
+    content: "";
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+    transform: translateX(-100%);
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Grid background texture for empty / canvas areas */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .bg-dots {
+    background-image: radial-gradient(hsl(var(--border-strong) / 0.7) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Brand gradient text */
+  .text-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(172 80% 60%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Sidebar nav item */
+  .nav-item {
+    @apply flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-sm font-medium text-muted-foreground transition-colors duration-150;
+  }
+  .nav-item:hover {
+    @apply bg-accent/70 text-foreground;
+  }
+  .nav-item[data-active="true"] {
+    @apply bg-primary/10 text-foreground;
+  }
+
+  /* Data row hover affordance */
+  .row-hover {
+    @apply transition-colors duration-100 hover:bg-accent/50;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+  .animate-in-fast {
+    animation: fade-in-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}

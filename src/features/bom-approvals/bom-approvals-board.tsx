@@ -1,0 +1,364 @@
+"use client";
+
+import * as React from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Building2,
+  X,
+  CheckCircle2,
+  History,
+  Plus,
+  Pencil,
+  Copy,
+  Trash2,
+  Eye,
+  ArrowRightLeft,
+  Check,
+} from "lucide-react";
+import {
+  db,
+  getUser,
+  addProjectBom,
+  updateProjectBom,
+  deleteProjectBom,
+} from "@/mock/db";
+import { BOM_STAGES } from "@/types";
+import type { ProjectBom, BomStage } from "@/types";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from "@/components/ui/context-menu";
+import { cn, formatCompactCurrency, formatDate } from "@/lib/utils";
+import { BOM_STAGE_COLOR, BOM_STAGE_VARIANT } from "@/constants/status";
+import { toast } from "@/components/ui/toast";
+
+const BOM_TYPES: ProjectBom["bomType"][] = ["Engineering", "Procurement", "Final Released"];
+const REVS = ["A", "B", "C", "D"];
+const rnd = (n: number) => Math.floor(Math.random() * n);
+const nowISO = () => new Date().toISOString();
+
+export function BomApprovalsBoard() {
+  const [boms, setBoms] = React.useState<ProjectBom[]>(() => db().projectBoms.slice());
+  const [dragId, setDragId] = React.useState<string | null>(null);
+  const [overCol, setOverCol] = React.useState<BomStage | null>(null);
+  const [editId, setEditId] = React.useState<string | null>(null);
+
+  const editing = boms.find((b) => b.id === editId) ?? null;
+  const auditEntry = (stage: BomStage) => ({ stage, userId: db().users[0]!.id, date: nowISO(), comment: `Moved to ${stage}.` });
+
+  const move = (id: string, stage: BomStage) => {
+    const bom = boms.find((b) => b.id === id);
+    if (!bom || bom.stage === stage) return;
+    const audit = [...bom.audit, auditEntry(stage)];
+    setBoms((prev) => prev.map((b) => (b.id === id ? { ...b, stage, updatedAt: nowISO(), audit } : b)));
+    updateProjectBom(id, { stage, updatedAt: nowISO(), audit });
+    toast.success("BOM advanced", `${bom.number} → ${stage}`);
+  };
+
+  const update = (id: string, patch: Partial<ProjectBom>) => {
+    setBoms((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    updateProjectBom(id, patch);
+  };
+
+  const remove = (id: string) => {
+    const bom = boms.find((b) => b.id === id);
+    if (!bom) return;
+    setBoms((prev) => prev.filter((b) => b.id !== id));
+    deleteProjectBom(id);
+    if (editId === id) setEditId(null);
+    toast({
+      title: "BOM deleted",
+      description: bom.number,
+      variant: "warning",
+      action: { label: "Undo", onClick: () => { addProjectBom(bom); setBoms((prev) => [bom, ...prev]); } },
+    });
+  };
+
+  const duplicate = (src: ProjectBom) => {
+    const copy: ProjectBom = {
+      ...src,
+      id: `PB-new-${Date.now()}`,
+      number: `BOM-${7000 + rnd(999)}`,
+      stage: "Draft",
+      audit: [{ stage: "Draft", userId: db().users[0]!.id, date: nowISO(), comment: "Cloned from existing BOM." }],
+    };
+    addProjectBom(copy);
+    setBoms((prev) => [copy, ...prev]);
+    toast.success("Duplicated", copy.number);
+  };
+
+  const addCard = (stage: BomStage) => {
+    const product = db().products[0]!;
+    const me = db().users[0]!;
+    const bom: ProjectBom = {
+      id: `PB-new-${Date.now()}`,
+      number: `BOM-${7000 + rnd(999)}`,
+      projectId: product.id,
+      projectNumber: product.projectNumber,
+      projectName: product.name,
+      customer: product.customer,
+      revision: "A",
+      stage,
+      bomType: "Engineering",
+      lineItems: 0,
+      uniqueMaterials: 0,
+      totalValue: 0,
+      criticalItems: 0,
+      longLeadItems: 0,
+      ownerId: me.id,
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      audit: [{ stage, userId: me.id, date: nowISO(), comment: "Draft created." }],
+    };
+    addProjectBom(bom);
+    setBoms((prev) => [bom, ...prev]);
+    setEditId(bom.id);
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-full min-h-0 gap-3 overflow-x-auto p-4">
+        {BOM_STAGES.map((col) => {
+          const items = boms.filter((b) => b.stage === col);
+          const value = items.reduce((s, b) => s + b.totalValue, 0);
+          return (
+            <div
+              key={col}
+              onDragOver={(e) => { e.preventDefault(); setOverCol(col); }}
+              onDragLeave={() => setOverCol((c) => (c === col ? null : c))}
+              onDrop={() => { if (dragId) move(dragId, col); setDragId(null); setOverCol(null); }}
+              className={cn(
+                "flex w-[310px] shrink-0 flex-col rounded-xl border bg-surface/40 transition-colors",
+                overCol === col ? "border-primary/50 bg-primary/[0.04]" : "border-border",
+              )}
+            >
+              <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+                <span className={cn("size-2 rounded-full", BOM_STAGE_COLOR[col])} />
+                <span className="text-[13px] font-semibold">{col}</span>
+                <Badge variant="muted" className="ml-0.5">{items.length}</Badge>
+                <span className="ml-auto text-2xs text-muted-foreground tabular">{value > 0 && formatCompactCurrency(value)}</span>
+                <button onClick={() => addCard(col)} title={`Add BOM to ${col}`} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                  <Plus className="size-3.5" />
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-2 overflow-y-auto p-2">
+                <AnimatePresence initial={false}>
+                  {items.map((b) => {
+                    const owner = getUser(b.ownerId);
+                    return (
+                      <ContextMenu key={b.id}>
+                        <ContextMenuTrigger asChild>
+                          <motion.div
+                            layout
+                            draggable
+                            onDragStart={() => setDragId(b.id)}
+                            onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                            onClick={() => setEditId(b.id)}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: dragId === b.id ? 0.4 : 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="group cursor-grab rounded-xl border border-border bg-surface p-3 shadow-xs transition-shadow hover:border-border-strong hover:shadow-sm active:cursor-grabbing"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-mono text-2xs text-muted-foreground">{b.number}</span>
+                              <Badge variant="outline" className="font-normal">{b.bomType}</Badge>
+                            </div>
+                            <p className="mt-1.5 line-clamp-1 text-[13px] font-medium">{b.projectName}</p>
+                            <div className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground">
+                              <Building2 className="size-3" /> {b.customer}
+                              <span className="text-muted-foreground/40">·</span> Rev {b.revision}
+                            </div>
+                            <div className="mt-2.5 grid grid-cols-3 gap-1.5 rounded-lg bg-surface-sunken/50 p-2 text-center">
+                              <div><p className="text-sm font-semibold tabular">{b.lineItems}</p><p className="text-2xs text-muted-foreground">lines</p></div>
+                              <div><p className={cn("text-sm font-semibold tabular", b.criticalItems > 0 && "text-warning")}>{b.criticalItems}</p><p className="text-2xs text-muted-foreground">critical</p></div>
+                              <div><p className="text-sm font-semibold tabular">{b.longLeadItems}</p><p className="text-2xs text-muted-foreground">long-lead</p></div>
+                            </div>
+                            <div className="mt-2.5 flex items-center justify-between border-t border-border/60 pt-2.5">
+                              <span className="text-[13px] font-semibold tabular text-primary">{formatCompactCurrency(b.totalValue)}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-2xs text-muted-foreground">{b.audit.length} steps</span>
+                                <Avatar className="size-5"><AvatarFallback className="text-[8px]" style={{ background: `hsl(${owner?.hue} 55% 22%)`, color: `hsl(${owner?.hue} 80% 76%)` }}>{owner?.initials}</AvatarFallback></Avatar>
+                              </div>
+                            </div>
+                          </motion.div>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="w-48">
+                          <ContextMenuItem onClick={() => setEditId(b.id)}><Eye /> Open</ContextMenuItem>
+                          <ContextMenuItem onClick={() => setEditId(b.id)}><Pencil /> Edit</ContextMenuItem>
+                          <ContextMenuSub>
+                            <ContextMenuSubTrigger><ArrowRightLeft /> Move to</ContextMenuSubTrigger>
+                            <ContextMenuSubContent>
+                              {BOM_STAGES.filter((s) => s !== b.stage).map((s) => (
+                                <ContextMenuItem key={s} onClick={() => move(b.id, s)}>{s}</ContextMenuItem>
+                              ))}
+                            </ContextMenuSubContent>
+                          </ContextMenuSub>
+                          <ContextMenuItem onClick={() => duplicate(b)}><Copy /> Duplicate</ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem destructive onClick={() => remove(b.id)}><Trash2 /> Delete</ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
+                  })}
+                </AnimatePresence>
+                {items.length === 0 && (
+                  <button onClick={() => addCard(col)} className="flex h-20 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-2xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+                    <Plus className="size-3.5" /> Add BOM
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <BomEditDrawer
+        bom={editing}
+        onClose={() => setEditId(null)}
+        onSave={(patch) => { if (editing) { update(editing.id, patch); toast.success("Saved", editing.number); } }}
+        onMove={(stage) => editing && move(editing.id, stage)}
+        onDelete={() => editing && remove(editing.id)}
+      />
+    </div>
+  );
+}
+
+function BomEditDrawer({
+  bom,
+  onClose,
+  onSave,
+  onMove,
+  onDelete,
+}: {
+  bom: ProjectBom | null;
+  onClose: () => void;
+  onSave: (patch: Partial<ProjectBom>) => void;
+  onMove: (stage: BomStage) => void;
+  onDelete: () => void;
+}) {
+  const [form, setForm] = React.useState<ProjectBom | null>(bom);
+  React.useEffect(() => setForm(bom), [bom]);
+
+  return (
+    <AnimatePresence>
+      {bom && form && (
+        <>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-[140] bg-black/30 backdrop-blur-[2px]" />
+          <motion.aside
+            initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+            transition={{ type: "spring", stiffness: 360, damping: 36 }}
+            className="fixed right-0 top-0 z-[141] flex h-full w-[440px] flex-col border-l border-border bg-surface-overlay shadow-lg"
+          >
+            <div className="flex items-start justify-between border-b border-border p-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-2xs text-muted-foreground">{form.number}</span>
+                  <Badge variant={BOM_STAGE_VARIANT[form.stage]}>{form.stage}</Badge>
+                </div>
+                <h2 className="mt-1 text-base font-semibold">{form.projectName}</h2>
+                <p className="text-xs text-muted-foreground">{form.projectNumber} · {form.customer}</p>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={onClose}><X className="size-4" /></Button>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>BOM type</Label>
+                  <Select value={form.bomType} onValueChange={(v) => setForm({ ...form, bomType: v as ProjectBom["bomType"] })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{BOM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Revision</Label>
+                  <Select value={form.revision} onValueChange={(v) => setForm({ ...form, revision: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{REVS.map((r) => <SelectItem key={r} value={r}>Rev {r}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Line items</Label>
+                  <Input type="number" value={form.lineItems} onChange={(e) => setForm({ ...form, lineItems: Number(e.target.value) })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>BOM value</Label>
+                  <Input type="number" value={form.totalValue} onChange={(e) => setForm({ ...form, totalValue: Number(e.target.value) })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Critical items</Label>
+                  <Input type="number" value={form.criticalItems} onChange={(e) => setForm({ ...form, criticalItems: Number(e.target.value) })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Long-lead items</Label>
+                  <Input type="number" value={form.longLeadItems} onChange={(e) => setForm({ ...form, longLeadItems: Number(e.target.value) })} />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label>Stage</Label>
+                  <Select value={form.stage} onValueChange={(v) => { setForm({ ...form, stage: v as BomStage }); onMove(v as BomStage); }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{BOM_STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-3 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <History className="size-3.5" /> Approval audit trail
+                </p>
+                <div className="relative space-y-0 pl-5">
+                  <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
+                  {form.audit.map((a, i) => {
+                    const user = getUser(a.userId);
+                    const isLast = i === form.audit.length - 1;
+                    return (
+                      <div key={i} className="relative pb-4">
+                        <div className={cn("absolute -left-5 top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-surface", isLast ? "bg-primary" : "bg-success")}>
+                          {!isLast && <CheckCircle2 className="size-2.5 text-white" />}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={BOM_STAGE_VARIANT[a.stage]}>{a.stage}</Badge>
+                          <span className="text-2xs text-muted-foreground">{formatDate(a.date, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                        <p className="mt-1 text-[13px]">{a.comment}</p>
+                        <p className="mt-0.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
+                          <Avatar className="size-4"><AvatarFallback className="text-[7px]" style={{ background: `hsl(${user?.hue} 55% 22%)`, color: `hsl(${user?.hue} 80% 76%)` }}>{user?.initials}</AvatarFallback></Avatar>
+                          {user?.name}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-border p-4">
+              <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={onDelete}>
+                <Trash2 className="size-4" /> Delete
+              </Button>
+              <div className="ml-auto flex gap-2">
+                <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+                <Button size="sm" onClick={() => { onSave({ bomType: form.bomType, revision: form.revision, lineItems: form.lineItems, totalValue: form.totalValue, criticalItems: form.criticalItems, longLeadItems: form.longLeadItems }); onClose(); }}>
+                  <Check className="size-4" /> Save
+                </Button>
+              </div>
+            </div>
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
