@@ -25,7 +25,8 @@ import {
   Clock,
   Download,
 } from "lucide-react";
-import { db } from "@/mock/db";
+import { useVendors, usePurchaseOrders } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 import type { Supplier } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -138,7 +139,8 @@ function Initial({ s, size = 36 }: { s: Supplier; size?: number }) {
 type SortKey = "name" | "rating" | "onTimePct" | "qualityPct" | "leadTimeAvg" | "annualSpend" | "openPOs";
 
 export function SuppliersView() {
-  const vendors = db().suppliers;
+  const vendorsQuery = useVendors();
+  const vendors = vendorsQuery.data?.items ?? [];
   const statuses = React.useMemo(
     () => [...new Set(vendors.map((s) => s.status))],
     [vendors],
@@ -443,10 +445,7 @@ const VENDOR_DOCS = [
 ];
 
 function SupplierDrawerBody({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
-  const pos = React.useMemo(
-    () => db().purchaseOrders.filter((p) => p.supplierId === supplier.id),
-    [supplier],
-  );
+  const pos = usePurchaseOrders({ supplierId: supplier.id }).data?.items ?? [];
   const series = React.useMemo(() => supplierPerfSeries(), []);
 
   return (

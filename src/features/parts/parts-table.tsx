@@ -102,18 +102,20 @@ function FacetFilter({
           {options.map((opt) => {
             const checked = selected.includes(opt);
             return (
-              <button
+              <div
                 key={opt}
+                role="button"
+                tabIndex={0}
                 onClick={() =>
                   onChange(
                     checked ? selected.filter((s) => s !== opt) : [...selected, opt],
                   )
                 }
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
               >
                 <Checkbox checked={checked} className="pointer-events-none" />
                 <span className="flex-1 text-left">{opt}</span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -181,6 +183,11 @@ export function PartsTable() {
     getGroupedRowModel: getGroupedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
     enableRowSelection: true,
+    // Don't let the table schedule async state-resets on mount (they fire a
+    // microtask setState before mount completes → React 19 dev warning).
+    autoResetExpanded: false,
+    autoResetPageIndex: false,
+    autoResetAll: false,
   });
 
   const { rows } = table.getRowModel();
@@ -189,13 +196,8 @@ export function PartsTable() {
   const rowHeight = density === "compact" ? 40 : 52;
   const TABLE_MIN_WIDTH = 1180;
 
-  // Defer the virtualizer until after mount so it only measures the committed
-  // instance — avoids a React 19 StrictMode state-update-before-mount warning.
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => setMounted(true), []);
-
   const virtualizer = useVirtualizer({
-    count: mounted ? rows.length : 0,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight,
     overscan: 12,

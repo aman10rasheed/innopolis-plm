@@ -4,9 +4,11 @@ import { Network, Plus, GitCompare } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { BomExplorer } from "@/features/bom/bom-explorer";
+import { useUIStore } from "@/stores/ui-store";
 import { toast } from "@/components/ui/toast";
 
 export default function BomPage() {
+  const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
   return (
     <div className="flex h-full flex-col">
       <PageHeader
@@ -18,7 +20,7 @@ export default function BomPage() {
             <Button variant="outline" size="sm" onClick={() => toast.info("Compare", "Select two revisions to diff")}>
               <GitCompare className="size-4" /> Compare revisions
             </Button>
-            <Button size="sm" onClick={() => toast.success("Add component", "Search a part to insert")}>
+            <Button size="sm" onClick={() => setBomAddComponentOpen(true)}>
               <Plus className="size-4" /> Add component
             </Button>
           </>

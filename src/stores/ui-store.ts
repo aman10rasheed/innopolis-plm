@@ -26,6 +26,7 @@ interface UIState {
   createReportOpen: boolean;
   createCountOpen: boolean;
   createWarehouseOpen: boolean;
+  bomAddComponentOpen: boolean;
   cadImportOpen: boolean;
   // CAD model currently shown in the viewer (set after an import)
   cadModel: { name: string; format: string } | null;
@@ -54,6 +55,7 @@ interface UIState {
   setCreateReportOpen: (v: boolean) => void;
   setCreateCountOpen: (v: boolean) => void;
   setCreateWarehouseOpen: (v: boolean) => void;
+  setBomAddComponentOpen: (v: boolean) => void;
   setCadImportOpen: (v: boolean) => void;
   setCadModel: (m: { name: string; format: string } | null) => void;
   togglePin: (id: string) => void;
@@ -82,6 +84,7 @@ export const useUIStore = create<UIState>()(
       createReportOpen: false,
       createCountOpen: false,
       createWarehouseOpen: false,
+      bomAddComponentOpen: false,
       cadImportOpen: false,
       cadModel: null,
       pinnedProjects: ["PR-1", "PR-2", "PR-3"],
@@ -111,6 +114,7 @@ export const useUIStore = create<UIState>()(
       setCreateReportOpen: (v) => set({ createReportOpen: v }),
       setCreateCountOpen: (v) => set({ createCountOpen: v }),
       setCreateWarehouseOpen: (v) => set({ createWarehouseOpen: v }),
+      setBomAddComponentOpen: (v) => set({ bomAddComponentOpen: v }),
       setCadImportOpen: (v) => set({ cadImportOpen: v }),
       setCadModel: (m) => set({ cadModel: m }),
       togglePin: (id) =>

@@ -5,12 +5,12 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { Button } from "@/components/ui/button";
 import { SuppliersView } from "@/features/suppliers/suppliers-view";
-import { db } from "@/mock/db";
+import { useVendors } from "@/lib/api";
 import { useUIStore } from "@/stores/ui-store";
 import { formatCompactCurrency } from "@/lib/utils";
 
 export default function VendorsPage() {
-  const vendors = db().suppliers;
+  const vendors = useVendors().data?.items ?? [];
   const approved = vendors.filter((v) => v.approved || v.status === "Preferred" || v.status === "Approved").length;
   const avgOnTime = Math.round(
     vendors.reduce((s, x) => s + x.onTimePct, 0) / Math.max(1, vendors.length),

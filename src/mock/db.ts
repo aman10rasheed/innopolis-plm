@@ -44,6 +44,11 @@ export function addPurchaseOrder(po: Database["purchaseOrders"][number]) {
 export function addProjectBom(b: Database["projectBoms"][number]) {
   db().projectBoms.unshift(b);
 }
+/** Append a part line-item to a project's BOM (the BOM Explorer "Add component" seam). */
+export function addProjectBomLine(productId: string, edge: BomEdge) {
+  const lines = db().projectBomLines;
+  (lines[productId] ??= []).push(edge);
+}
 
 /** Update / delete helpers so board edits persist across navigation. */
 export function updateEco(id: string, patch: Partial<Database["ecos"][number]>) {

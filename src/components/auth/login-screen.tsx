@@ -8,42 +8,36 @@ import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
-import { CREDENTIALS, ROLES, ROLE_META, type Role } from "@/auth/credentials";
+import { ROLE_META } from "@/auth/credentials";
 
 export function LoginScreen() {
   const router = useRouter();
-  const login = useAuthStore((s) => s.login);
-  const loginAs = useAuthStore((s) => s.loginAs);
+  const loginRemote = useAuthStore((s) => s.loginRemote);
 
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState("");
-  const [busy, setBusy] = React.useState<Role | "form" | null>(null);
+  const [busy, setBusy] = React.useState(false);
 
   const go = (home: string) => {
     // tiny delay so the loading state reads as a real sign-in
-    setTimeout(() => router.replace(home), 350);
+    setTimeout(() => router.replace(home), 250);
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    setBusy("form");
-    const user = login(email, password);
-    if (!user) {
-      setBusy(null);
-      setError("Invalid email or password. Try a demo account below.");
-      return;
+    setBusy(true);
+    try {
+      const user = await loginRemote(email, password);
+      go(ROLE_META[user.role]?.home ?? "/");
+    } catch (err) {
+      setBusy(false);
+      const msg = err instanceof Error ? err.message : "Sign-in failed.";
+      // Network/connection failures get a friendlier hint.
+      setError(/network error/i.test(msg) ? "Can't reach the server. Check your connection and try again." : msg);
     }
-    go(ROLE_META[user.role].home);
-  };
-
-  const quickLogin = (role: Role) => {
-    setBusy(role);
-    const user = loginAs(role);
-    go(ROLE_META[user.role].home);
   };
 
   return (
@@ -159,52 +153,14 @@ export function LoginScreen() {
               </p>
             )}
 
-            <Button type="submit" className="w-full" disabled={busy !== null}>
-              {busy === "form" ? <Loader2 className="size-4 animate-spin" /> : <>Sign in <ArrowRight className="size-4" /></>}
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <>Sign in <ArrowRight className="size-4" /></>}
             </Button>
           </form>
 
-          {/* Quick demo accounts */}
-          <div className="mt-7">
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Demo accounts</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <p className="mt-3 text-center text-2xs text-muted-foreground">
-              One-click sign in — each role sees a tailored workspace.
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {ROLES.map((role) => {
-                const cred = CREDENTIALS.find((c) => c.role === role)!;
-                const meta = ROLE_META[role];
-                return (
-                  <button
-                    key={role}
-                    onClick={() => quickLogin(role)}
-                    disabled={busy !== null}
-                    className={cn(
-                      "group flex items-center gap-2.5 rounded-lg border border-border bg-surface p-2.5 text-left transition-all hover:border-primary/40 hover:bg-accent/40 disabled:opacity-60",
-                    )}
-                  >
-                    <div
-                      className="flex size-8 shrink-0 items-center justify-center rounded-full text-2xs font-bold"
-                      style={{ background: `hsl(${cred.hue} 55% 22%)`, color: `hsl(${cred.hue} 80% 76%)` }}
-                    >
-                      {busy === role ? <Loader2 className="size-3.5 animate-spin" /> : cred.initials}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-medium leading-tight">{role}</p>
-                      <p className="truncate text-2xs text-muted-foreground">{meta.blurb}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-3 text-center text-2xs text-muted-foreground/70">
-              Credentials in <span className="font-mono">src/auth/credentials.ts</span>
-            </p>
-          </div>
+          <p className="mt-6 text-center text-2xs text-muted-foreground/70">
+            Use your Innopolis credentials. Trouble signing in? Contact your administrator.
+          </p>
         </motion.div>
       </div>
     </div>

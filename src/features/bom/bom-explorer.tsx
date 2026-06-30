@@ -29,14 +29,23 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Thumbnail } from "@/components/shared/thumbnail";
 import { DonutChart } from "@/components/shared/charts";
-import { buildProjectBom, flattenBom, rootProjects } from "@/mock/db";
+import { buildProjectBom, flattenBom, rootProjects, addProjectBomLine, db } from "@/mock/db";
 import type { BomNode } from "@/types";
+import { useUIStore } from "@/stores/ui-store";
 import { formatCurrency, formatNumber, cn } from "@/lib/utils";
 import { LIFECYCLE_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
@@ -54,7 +63,9 @@ const LEVEL_COLORS = [
 export function BomExplorer() {
   const [rootIdx, setRootIdx] = React.useState(0);
   const root = ROOTS[rootIdx]!;
-  const tree = React.useMemo(() => buildProjectBom(root.id), [root.id]);
+  // bumped whenever a BOM line is added so the memoized tree rebuilds
+  const [version, setVersion] = React.useState(0);
+  const tree = React.useMemo(() => buildProjectBom(root.id), [root.id, version]);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(["root"]));
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [query, setQuery] = React.useState("");
@@ -360,7 +371,160 @@ export function BomExplorer() {
           </div>
         )}
       </div>
+
+      <AddComponentDialog
+        projectId={root.id}
+        projectName={root.name}
+        existingRefIds={new Set((tree.children ?? []).map((c) => c.refId))}
+        onAdded={() => setVersion((v) => v + 1)}
+      />
     </div>
+  );
+}
+
+function AddComponentDialog({
+  projectId,
+  projectName,
+  existingRefIds,
+  onAdded,
+}: {
+  projectId: string;
+  projectName: string;
+  existingRefIds: Set<string>;
+  onAdded: () => void;
+}) {
+  const open = useUIStore((s) => s.bomAddComponentOpen);
+  const setOpen = useUIStore((s) => s.setBomAddComponentOpen);
+
+  const [query, setQuery] = React.useState("");
+  const [partId, setPartId] = React.useState<string | null>(null);
+  const [qty, setQty] = React.useState("1");
+  const [refDes, setRefDes] = React.useState("");
+
+  // reset the form each time the dialog opens
+  React.useEffect(() => {
+    if (open) {
+      setQuery("");
+      setPartId(null);
+      setQty("1");
+      setRefDes("");
+    }
+  }, [open]);
+
+  const parts = db().parts;
+  const matches = React.useMemo(() => {
+    const t = query.trim().toLowerCase();
+    const list = t
+      ? parts.filter((p) => p.name.toLowerCase().includes(t) || p.partNumber.toLowerCase().includes(t))
+      : parts;
+    return list.slice(0, 50);
+  }, [parts, query]);
+
+  const selectedPart = partId ? parts.find((p) => p.id === partId) ?? null : null;
+  const qtyNum = Number(qty);
+  const canAdd = !!selectedPart && Number.isFinite(qtyNum) && qtyNum > 0;
+
+  const submit = () => {
+    if (!canAdd || !selectedPart) return;
+    addProjectBomLine(projectId, {
+      refId: selectedPart.id,
+      qty: qtyNum,
+      refDes: refDes.trim() || undefined,
+    });
+    toast.success("Component added", `${selectedPart.name} ×${qtyNum} → ${projectName}`);
+    onAdded();
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add component</DialogTitle>
+          <DialogDescription>Insert a Material Master part into {projectName}.</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search parts by name or code…"
+              className="pl-8"
+            />
+          </div>
+
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-border">
+            {matches.length === 0 ? (
+              <div className="px-3 py-6 text-center text-2xs text-muted-foreground">No matching parts</div>
+            ) : (
+              matches.map((p) => {
+                const inBom = existingRefIds.has(p.id);
+                const isSel = partId === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPartId(p.id)}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-accent/50",
+                      isSel && "bg-primary/10 hover:bg-primary/10",
+                    )}
+                  >
+                    <Thumbnail hue={(p.partNumber.length * 47) % 360} size={26} icon={Box} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-[13px] font-medium">{p.name}</span>
+                        {inBom && <Badge variant="muted">in BOM</Badge>}
+                      </div>
+                      <span className="font-mono text-2xs text-muted-foreground">{p.partNumber}</span>
+                    </div>
+                    <span className="shrink-0 text-2xs tabular text-muted-foreground">{formatCurrency(p.unitCost)}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">
+                Quantity{selectedPart ? ` (${selectedPart.uom})` : ""}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">Ref. designator (optional)</span>
+              <Input value={refDes} onChange={(e) => setRefDes(e.target.value)} placeholder="e.g. P-101" />
+            </label>
+          </div>
+
+          {selectedPart && canAdd && (
+            <div className="flex items-center justify-between rounded-lg border border-border bg-surface-sunken/40 px-3 py-2 text-2xs">
+              <span className="text-muted-foreground">Extended cost</span>
+              <span className="font-semibold tabular">{formatCurrency(selectedPart.unitCost * qtyNum)}</span>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button size="sm" disabled={!canAdd} onClick={submit}>
+            Add component
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

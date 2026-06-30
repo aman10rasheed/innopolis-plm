@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm, Controller, type DefaultValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z, type ZodTypeAny } from "zod";
+import { useSaveVendor } from "@/lib/api";
 import {
   Package,
   GitPullRequestArrow,
@@ -121,7 +122,7 @@ function CreateShell<TSchema extends ZodTypeAny>({
   schema: TSchema;
   defaultValues: DefaultValues<z.input<TSchema>>;
   destination: string;
-  buildAndPersist: (values: z.output<TSchema>) => string; // returns success detail line
+  buildAndPersist: (values: z.output<TSchema>) => string | Promise<string>; // success detail line
   successLine: string;
   children: (form: ReturnType<typeof useForm<z.input<TSchema>>>) => React.ReactNode;
 }) {
@@ -137,15 +138,18 @@ function CreateShell<TSchema extends ZodTypeAny>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const onSubmit = form.handleSubmit((values) => {
+  const onSubmit = form.handleSubmit(async (values) => {
     setSubmitting(true);
-    setTimeout(() => {
-      const detail = buildAndPersist(values as z.output<TSchema>);
-      setSubmitting(false);
+    try {
+      const detail = await buildAndPersist(values as z.output<TSchema>);
       toast.success(successLine, detail);
       onOpenChange(false);
       router.push(destination);
-    }, 550);
+    } catch (e) {
+      toast.error("Couldn't save", e instanceof Error ? e.message : "Please try again");
+    } finally {
+      setSubmitting(false);
+    }
   });
 
   return (
@@ -606,6 +610,7 @@ const vendorSchema = z.object({
 });
 
 export function CreateVendorDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const saveVendor = useSaveVendor();
   return (
     <CreateShell
       open={open}
@@ -618,35 +623,26 @@ export function CreateVendorDialog({ open, onOpenChange }: { open: boolean; onOp
       successLine="Vendor added"
       schema={vendorSchema}
       defaultValues={{ name: "", country: "India", category: CATEGORY_NAMES[0] ?? "", tier: "2", paymentTerms: PAYMENT_TERMS[0]!, contact: "", email: "" }}
-      buildAndPersist={(v) => {
+      buildAndPersist={async (v) => {
         const loc = COUNTRIES.find((c: { country: string; region: string }) => c.country === v.country);
-        const code = v.name.split(" ").map((w) => w[0]).join("").slice(0, 4).toUpperCase();
-        const s: Supplier = {
-          id: `SUP-new-${Date.now()}`,
-          name: v.name,
-          code,
-          country: v.country,
-          region: loc?.region ?? "Domestic",
-          category: v.category,
-          tier: Number(v.tier) as 1 | 2 | 3,
-          rating: 3.5,
-          onTimePct: 85,
-          qualityPct: 90,
-          partsSupplied: 0,
-          openPOs: 0,
-          annualSpend: 0,
-          leadTimeAvg: 30,
-          riskScore: 30,
-          status: "Under Review",
-          contact: v.contact || db().users[0]!.name,
-          email: v.email || `sales@${v.name.toLowerCase().replace(/[^a-z]/g, "").slice(0, 12)}.com`,
-          gstVat: `VAT-${10000000 + rnd(89999999)}`,
-          paymentTerms: v.paymentTerms,
-          categoriesSupplied: [v.category],
-          approved: false,
-        };
-        addSupplier(s);
-        return `${s.name} · ${s.code}`;
+        const code = `V-${v.name.split(" ").map((w) => w[0]).join("").slice(0, 4).toUpperCase()}`;
+        await saveVendor.mutateAsync({
+          body: {
+            code,
+            name: v.name,
+            country: v.country,
+            region: loc?.region ?? "Domestic",
+            category: v.category,
+            categories_supplied: [v.category],
+            tier: Number(v.tier),
+            contact: v.contact || undefined,
+            email: v.email || undefined,
+            payment_terms: v.paymentTerms,
+            status: "Under Review",
+            approved: false,
+          },
+        });
+        return `${v.name} · ${code}`;
       }}
     >
       {({ register, control, formState: { errors } }) => (
