@@ -1,12 +1,12 @@
 "use client";
 
-import { ClipboardCheck, Plus, Filter } from "lucide-react";
+import { ClipboardCheck, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { BoardFilterButton } from "@/components/shared/board-filter-button";
 import { BomApprovalsBoard } from "@/features/bom-approvals/bom-approvals-board";
 import { db } from "@/mock/db";
 import { useUIStore } from "@/stores/ui-store";
-import { toast } from "@/components/ui/toast";
 
 export default function BomApprovalsPage() {
   const pending = db().projectBoms.filter((b) => b.stage !== "Released for Purchase").length;
@@ -19,9 +19,14 @@ export default function BomApprovalsPage() {
         icon={ClipboardCheck}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => toast.info("Filter")}>
-              <Filter className="size-4" /> Filter
-            </Button>
+            <BoardFilterButton
+              boardKey="bomApprovals"
+              options={[
+                { value: "Engineering", label: "Engineering" },
+                { value: "Procurement", label: "Procurement" },
+                { value: "Final Released", label: "Final Released" },
+              ]}
+            />
             <Button size="sm" onClick={() => setCreateBomOpen(true)}>
               <Plus className="size-4" /> Draft BOM
             </Button>

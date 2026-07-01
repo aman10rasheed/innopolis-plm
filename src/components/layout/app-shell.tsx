@@ -21,6 +21,7 @@ import { NotificationCenter } from "@/components/overlays/notification-center";
 import { CreateDialogsHost } from "@/features/create/create-dialogs";
 import { CadImportDialog } from "@/features/cad/cad-import-dialog";
 import { LoginScreen } from "@/components/auth/login-screen";
+import { SetPasswordScreen } from "@/components/auth/set-password-screen";
 import { LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 
@@ -35,6 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setInspectorWidth,
   } = useUIStore();
   const user = useAuthStore((s) => s.user);
+  const mustChangePassword = useAuthStore((s) => s.mustChangePassword);
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
 
@@ -49,6 +51,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Gate: not signed in → login screen.
   if (!user) return <LoginScreen />;
+
+  // Gate: signed in but the backend requires a password change → set-password screen.
+  if (mustChangePassword) return <SetPasswordScreen />;
 
   const allowed = canAccess(user.role, pathname);
 

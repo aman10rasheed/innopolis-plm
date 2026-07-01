@@ -1,12 +1,12 @@
 "use client";
 
-import { GitPullRequestArrow, Plus, Filter, LayoutGrid } from "lucide-react";
+import { GitPullRequestArrow, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { BoardFilterButton } from "@/components/shared/board-filter-button";
 import { ChangesBoard } from "@/features/changes/changes-board";
 import { db } from "@/mock/db";
 import { useUIStore } from "@/stores/ui-store";
-import { toast } from "@/components/ui/toast";
 
 export default function ChangesPage() {
   const open = db().ecos.filter((e) => e.status !== "Completed").length;
@@ -19,9 +19,15 @@ export default function ChangesPage() {
         icon={GitPullRequestArrow}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => toast.info("Filters")}>
-              <Filter className="size-4" /> Filter
-            </Button>
+            <BoardFilterButton
+              boardKey="changes"
+              options={[
+                { value: "Critical", label: "Critical priority" },
+                { value: "High", label: "High priority" },
+                { value: "Medium", label: "Medium priority" },
+                { value: "Low", label: "Low priority" },
+              ]}
+            />
             <Button size="sm" onClick={() => setCreateEcoOpen(true)}>
               <Plus className="size-4" /> New change
             </Button>

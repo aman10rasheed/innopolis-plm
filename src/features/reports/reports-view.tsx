@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
+import { downloadText } from "@/lib/export";
 import { StatCard } from "@/components/shared/stat-card";
 import {
   AreaTrend,
@@ -271,13 +272,25 @@ function ReportPreview({ report }: { report: ReportTemplate }) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => toast.info("Schedule", `${report.name} runs ${report.schedule.toLowerCase()}`)}
+            onClick={() => {
+              const next = window.prompt(
+                `Schedule for "${report.name}" (e.g. Daily, Weekly, Monthly):`,
+                report.schedule,
+              );
+              if (next == null || !next.trim()) return;
+              report.schedule = next.trim();
+              toast.success("Schedule updated", `${report.name} now runs ${next.trim().toLowerCase()}`);
+            }}
           >
             <CalendarClock className="size-4" /> Schedule
           </Button>
           <Button
             size="sm"
-            onClick={() => toast.success("Export started", `${report.name}.pdf is being prepared`)}
+            onClick={() => {
+              const body = `${report.name}\n${"=".repeat(report.name.length)}\n\nType: ${report.type}\nOwner: ${report.owner}\nSchedule: ${report.schedule}\nLast generated: ${timeAgo(report.lastGenerated)}\n\n${report.description}\n\n[Generated report export — frontend demo stand-in.]\n`;
+              downloadText(body, `${report.name.replace(/\s+/g, "-")}.txt`);
+              toast.success("Report exported", `${report.name} downloaded`);
+            }}
           >
             <Download className="size-4" /> Export PDF
           </Button>

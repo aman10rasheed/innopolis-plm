@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { db, getSupplier } from "@/mock/db";
 import type { Rfq, RfqMode, Quotation } from "@/types";
+import { useUIStore } from "@/stores/ui-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ export function ProcurementView() {
 // ---------------------------------------------------------------------------
 
 function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void }) {
+  useUIStore((s) => s.dataRev); // re-render when an RFQ is generated
   const rfqs = db().rfqs;
   const [genOpen, setGenOpen] = React.useState(false);
 
@@ -221,6 +223,34 @@ function GenerateRfqDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [mode, setMode] = React.useState<RfqMode>("Vendor-wise");
+  const bumpDataRev = useUIStore((s) => s.bumpDataRev);
+
+  const generate = () => {
+    const root = db().products[0];
+    const vendorIds = db().suppliers.slice(0, 3).map((s) => s.id);
+    const rfq: Rfq = {
+      id: `RFQ-new-${Date.now()}`,
+      number: `RFQ-${Math.floor(1000 + Math.random() * 8999)}`,
+      title: `${mode} RFQ — ${root?.name ?? "Current project"}`,
+      mode,
+      status: "Draft",
+      projectId: root?.id,
+      projectNumber: root?.projectNumber,
+      vendorIds,
+      lineItems: 8,
+      category: undefined,
+      estValue: Math.round(50000 + Math.random() * 200000),
+      requiredDate: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      ownerId: db().users[0]!.id,
+      quotesReceived: 0,
+      quotesExpected: vendorIds.length,
+    };
+    db().rfqs.unshift(rfq);
+    bumpDataRev();
+    toast.success("RFQ generated", `${rfq.number} created from current BOM`);
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -269,10 +299,7 @@ function GenerateRfqDialog({
             <Button variant="outline" size="sm">Cancel</Button>
           </DialogClose>
           <DialogClose asChild>
-            <Button
-              size="sm"
-              onClick={() => toast.success("RFQ generated", `${mode} request created from current BOM`)}
-            >
+            <Button size="sm" onClick={generate}>
               <Sparkles className="size-4" /> Generate
             </Button>
           </DialogClose>
@@ -293,6 +320,7 @@ function ComparisonTab({
   selectedRfqId: string | null;
   setSelectedRfqId: (id: string) => void;
 }) {
+  useUIStore((s) => s.dataRev); // re-render after an award
   const quotations = db().quotations;
   const rfqs = db().rfqs;
 
@@ -376,13 +404,25 @@ interface CmpRow {
 }
 
 function ComparisonGrid({ rfq }: { rfq: Rfq }) {
+  const dataRev = useUIStore((s) => s.dataRev);
+  const bumpDataRev = useUIStore((s) => s.bumpDataRev);
   const quotes = React.useMemo(
     () =>
       db()
         .quotations.filter((q) => q.rfqId === rfq.id)
         .sort((a, b) => a.rank - b.rank),
-    [rfq.id],
+    [rfq.id, dataRev],
   );
+
+  const award = (q: Quotation) => {
+    db().quotations.forEach((x) => {
+      if (x.rfqId === q.rfqId) x.status = x.id === q.id ? "Awarded" : "Rejected";
+    });
+    const awardedRfq = db().rfqs.find((r) => r.id === q.rfqId);
+    if (awardedRfq) awardedRfq.status = "Awarded";
+    bumpDataRev();
+    toast.success("Quotation awarded", `${q.rfqNumber} awarded to ${q.vendorName}`);
+  };
 
   const minTotal = Math.min(...quotes.map((q) => q.totalValue));
   const maxTotal = Math.max(...quotes.map((q) => q.totalValue));
@@ -529,7 +569,7 @@ function ComparisonGrid({ rfq }: { rfq: Rfq }) {
                     size="xs"
                     variant={recommended ? "default" : "outline"}
                     className="w-full"
-                    onClick={() => toast.success("Awarded", `Awarded to ${q.vendorName}`)}
+                    onClick={() => award(q)}
                   >
                     Award
                   </Button>
@@ -556,7 +596,10 @@ const RISK_VARIANT: Record<"Low" | "Medium" | "High", "muted" | "warning" | "des
 };
 
 function PurchaseOrdersTab() {
+  useUIStore((s) => s.dataRev); // re-render after a PO is created
+  const setCreatePoOpen = useUIStore((s) => s.setCreatePoOpen);
   const pos = db().purchaseOrders;
+  const [activePo, setActivePo] = React.useState<(typeof pos)[number] | null>(null);
 
   const openPos = pos.filter((p) => OPEN_STATUSES.has(p.status));
   const openValue = openPos.reduce(
@@ -606,7 +649,7 @@ function PurchaseOrdersTab() {
             <Button
               size="sm"
               className="ml-auto"
-              onClick={() => toast.success("New PO", "Draft purchase order created")}
+              onClick={() => setCreatePoOpen(true)}
             >
               <Plus className="size-4" /> Create PO
             </Button>
@@ -629,7 +672,7 @@ function PurchaseOrdersTab() {
               {pos.map((po) => (
                 <button
                   key={po.id}
-                  onClick={() => toast.info(po.number, `${po.supplierName} · ${formatCurrency(po.totalValue)}`)}
+                  onClick={() => setActivePo(po)}
                   className="grid w-full grid-cols-[1fr_1.5fr_1.1fr_0.6fr_0.9fr_1fr_1fr_1.2fr_0.8fr_0.9fr] items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
                 >
                   <span className="font-mono text-[13px] font-medium">{po.number}</span>
@@ -660,6 +703,36 @@ function PurchaseOrdersTab() {
           </div>
         </section>
       </div>
+
+      <Dialog open={!!activePo} onOpenChange={(o) => !o && setActivePo(null)}>
+        <DialogContent>
+          {activePo && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-mono">{activePo.number}</DialogTitle>
+                <DialogDescription>{activePo.supplierName}</DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border text-[13px]">
+                {[
+                  ["Status", activePo.status],
+                  ["Priority", activePo.priority],
+                  ["Total value", formatCurrency(activePo.totalValue)],
+                  ["Line items", String(activePo.lineItems)],
+                  ["Ordered", formatDate(activePo.orderedDate)],
+                  ["Expected", formatDate(activePo.expectedDate)],
+                  ["Received", `${activePo.receivedPct}%`],
+                  ["On-time risk", activePo.onTimeRisk],
+                ].map(([k, v]) => (
+                  <div key={k} className="bg-surface p-3">
+                    <p className="text-2xs text-muted-foreground">{k}</p>
+                    <p className="mt-0.5 font-medium">{v}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </ScrollArea>
   );
 }

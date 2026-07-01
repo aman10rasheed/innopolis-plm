@@ -37,6 +37,31 @@ export interface ApiUser {
 export interface ApiAuthResponse {
   token: string;
   user: ApiUser;
+  must_change_password?: boolean;
+}
+
+/** Full user record from /api/users (admin) — password_hash is never returned. */
+export interface ApiUserFull extends ApiUser {
+  is_active: boolean;
+  must_change_password?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiCreateUserInput {
+  name: string;
+  email: string;
+  password: string;
+  role: Role;
+  team?: string;
+  initials?: string;
+  hue?: number;
+}
+
+export interface ApiResetPasswordResponse {
+  user_id: UUID;
+  temporary_password: string;
+  message: string;
 }
 
 /* ---- Material Master masters ---- */

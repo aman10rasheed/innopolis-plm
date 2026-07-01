@@ -37,6 +37,7 @@ import {
 import { toast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatNumber, timeAgo, formatDate, cn } from "@/lib/utils";
+import { downloadText, copyToClipboard, shareUrl } from "@/lib/export";
 
 const DOC_TYPES: DocType[] = [
   "Drawing", "Specification", "Datasheet", "CAD Model", "Test Report",
@@ -275,15 +276,36 @@ function DocPreview({ doc, isFav, onToggleFav }: { doc: DocItem; isFav: boolean;
   const Icon = typeIcon(doc.type);
   const isVisual = doc.type === "Drawing" || doc.type === "Image" || doc.type === "CAD Model";
 
+  // Locally-tracked "current" version so Restore visibly moves the marker.
+  const [curVersion, setCurVersion] = React.useState(doc.version);
+  React.useEffect(() => setCurVersion(doc.version), [doc.id, doc.version]);
+
   const versions = React.useMemo(() => {
     const base = parseFloat(doc.version) || 1;
     return [
-      { v: doc.version, note: "Current — released", who: owner?.initials ?? "—", when: timeAgo(doc.updatedAt), current: true },
-      { v: (base - 0.1).toFixed(1), note: "Markups incorporated", who: "JL", when: "2 weeks ago", current: false },
-      { v: (base - 0.2).toFixed(1), note: "Initial review draft", who: "MR", when: "1 month ago", current: false },
-      { v: "0.1", note: "Created", who: "AK", when: "3 months ago", current: false },
-    ];
-  }, [doc, owner]);
+      { v: doc.version, note: "Current — released", who: owner?.initials ?? "—", when: timeAgo(doc.updatedAt) },
+      { v: (base - 0.1).toFixed(1), note: "Markups incorporated", who: "JL", when: "2 weeks ago" },
+      { v: (base - 0.2).toFixed(1), note: "Initial review draft", who: "MR", when: "1 month ago" },
+      { v: "0.1", note: "Created", who: "AK", when: "3 months ago" },
+    ].map((entry) => ({ ...entry, current: entry.v === curVersion }));
+  }, [doc, owner, curVersion]);
+
+  const downloadDoc = () => {
+    const body = `${doc.name}\n${"=".repeat(doc.name.length)}\n\nType: ${doc.type}\nFormat: ${doc.format}\nVersion: v${curVersion}\nFolder: ${doc.folder}\nOwner: ${owner?.name ?? "—"}\nUpdated: ${formatDate(doc.updatedAt)}\nLinked item: ${doc.linkedItemId ?? "None"}\n\n[This is a generated stand-in for the ${doc.format} document content.]\n`;
+    downloadText(body, `${doc.name}.${doc.format.toLowerCase() === "pdf" ? "txt" : doc.format.toLowerCase()}`);
+    toast.success("Download started", `${doc.name}.${doc.format.toLowerCase()}`);
+  };
+
+  const shareDoc = async () => {
+    const ok = await copyToClipboard(shareUrl(`/documents?doc=${doc.id}`));
+    ok ? toast.success("Share link copied", doc.name) : toast.error("Copy failed");
+  };
+
+  const restoreVersion = (v: string) => {
+    setCurVersion(v);
+    doc.version = v; // persist on the in-memory record
+    toast.success("Version restored", `${doc.name} reverted to v${v}`);
+  };
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -329,10 +351,10 @@ function DocPreview({ doc, isFav, onToggleFav }: { doc: DocItem; isFav: boolean;
         </div>
 
         <div className="flex gap-2">
-          <Button size="sm" className="flex-1 gap-1.5" onClick={() => toast.success("Download started", `${doc.name}.${doc.format.toLowerCase()}`)}>
+          <Button size="sm" className="flex-1 gap-1.5" onClick={downloadDoc}>
             <Download className="size-3.5" /> Download
           </Button>
-          <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={() => toast.info("Share link copied", doc.name)}>
+          <Button size="sm" variant="outline" className="flex-1 gap-1.5" onClick={shareDoc}>
             <Share2 className="size-3.5" /> Share
           </Button>
         </div>
@@ -374,7 +396,7 @@ function DocPreview({ doc, isFav, onToggleFav }: { doc: DocItem; isFav: boolean;
                   <p className="text-2xs text-muted-foreground">{ver.who} · {ver.when}</p>
                 </div>
                 {!ver.current && (
-                  <Button size="xs" variant="ghost" onClick={() => toast.success("Restored", `Reverted to v${ver.v}`)}>Restore</Button>
+                  <Button size="xs" variant="ghost" onClick={() => restoreVersion(ver.v)}>Restore</Button>
                 )}
               </div>
             ))}

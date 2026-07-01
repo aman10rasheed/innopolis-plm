@@ -84,6 +84,9 @@ export function addDocument(doc: Database["documents"][number]) {
 export function addWarehouse(w: Database["warehouses"][number]) {
   db().warehouses.unshift(w);
 }
+export function addNotification(n: Database["notifications"][number]) {
+  db().notifications.unshift(n);
+}
 
 export const getUser = (id: string) => maps().userById.get(id);
 export const getSupplier = (id: string) => maps().supplierById.get(id);

@@ -24,6 +24,7 @@ import {
   ChevronRight,
   X,
   Pencil,
+  Eye,
   Copy,
   Trash2,
   GitCompare,
@@ -64,6 +65,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/toast";
 import { PartDetailDrawer } from "./part-detail-drawer";
 import { CreatePartDialog } from "./create-part-dialog";
+import { EditPartDialog } from "./edit-part-dialog";
+import { downloadCsv, copyToClipboard } from "@/lib/export";
+import { getSupplier } from "@/mock/db";
 import { useUIStore } from "@/stores/ui-store";
 
 const CATEGORIES = [...new Set(db().parts.map((p) => p.category))];
@@ -137,8 +141,16 @@ function FacetFilter({
 
 export function PartsTable() {
   const { createPartOpen, setCreatePartOpen } = useUIStore();
+  const dataRev = useUIStore((s) => s.dataRev);
   const [extraParts, setExtraParts] = React.useState<Part[]>([]);
-  const data = React.useMemo(() => [...extraParts, ...db().parts], [extraParts]);
+  const [editPart, setEditPart] = React.useState<Part | null>(null);
+  const [archivedIds, setArchivedIds] = React.useState<Set<string>>(() => new Set());
+  // Bumped after editing a seeded part (mutated in place) to force the memo to recompute.
+  const [rev, setRev] = React.useState(0);
+  const data = React.useMemo(
+    () => [...extraParts, ...db().parts].filter((p) => !archivedIds.has(p.id)),
+    [extraParts, rev, archivedIds, dataRev],
+  );
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -206,8 +218,84 @@ export function PartsTable() {
   const selectedCount = Object.keys(rowSelection).length;
   const activeFilterCount = catFilter.length + lifeFilter.length + availFilter.length;
 
-  const exportCsv = () => {
-    toast.success("Export started", `${table.getFilteredRowModel().rows.length} parts queued as CSV`);
+  const exportRows = (parts: Part[], label: string) => {
+    if (!parts.length) {
+      toast.info("Nothing to export", "No parts match the current view");
+      return;
+    }
+    downloadCsv(
+      parts,
+      [
+        { header: "Part Number", value: (p) => p.partNumber },
+        { header: "Name", value: (p) => p.name },
+        { header: "Category", value: (p) => p.category },
+        { header: "Material", value: (p) => p.material },
+        { header: "Lifecycle", value: (p) => p.lifecycle },
+        { header: "Revision", value: (p) => p.revision },
+        { header: "Sourcing", value: (p) => p.sourcing },
+        { header: "Unit Cost", value: (p) => p.unitCost },
+        { header: "Lead Time (days)", value: (p) => p.leadTimeDays },
+        { header: "Vendor", value: (p) => getSupplier(p.supplierId)?.name ?? "" },
+        { header: "Stock Qty", value: (p) => p.stockQty },
+        { header: "UoM", value: (p) => p.uom },
+      ],
+      `material-master-${label}-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+    toast.success("Export complete", `${parts.length} parts downloaded as CSV`);
+  };
+
+  const exportCsv = () => exportRows(table.getFilteredRowModel().rows.map((r) => r.original), "filtered");
+
+  const selectedParts = () => table.getSelectedRowModel().rows.map((r) => r.original);
+
+  const duplicatePart = (part: Part) => {
+    const clone: Part = {
+      ...part,
+      id: `P-dup-${Date.now()}`,
+      partNumber: `${part.partNumber}-COPY`,
+      name: `${part.name} (copy)`,
+      lifecycle: "In Design",
+      revision: "A",
+      stockQty: 0,
+      whereUsedCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setExtraParts((prev) => [clone, ...prev]);
+    if (parentRef.current) parentRef.current.scrollTo({ top: 0 });
+    toast.success("Duplicated", `${part.partNumber} cloned as ${clone.partNumber}`);
+  };
+
+  const archivePart = (part: Part) => {
+    setArchivedIds((prev) => new Set(prev).add(part.id));
+    setRowSelection({});
+    toast({
+      title: "Archived",
+      description: `${part.partNumber} removed from the active master`,
+      variant: "success",
+      action: {
+        label: "Undo",
+        onClick: () =>
+          setArchivedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(part.id);
+            return next;
+          }),
+      },
+    });
+  };
+
+  const promoteSelected = () => {
+    const sel = selectedParts();
+    const ids = new Set(sel.map((p) => p.id));
+    setExtraParts((prev) => prev.map((p) => (ids.has(p.id) ? { ...p, lifecycle: "Released" as const } : p)));
+    // Seeded parts are mutated in place; bump rev to re-render.
+    sel.forEach((p) => {
+      if (!extraParts.some((e) => e.id === p.id)) p.lifecycle = "Released";
+    });
+    setRev((r) => r + 1);
+    setRowSelection({});
+    toast.success("Lifecycle promoted", `${sel.length} part(s) moved to Released`);
   };
 
   return (
@@ -371,19 +459,22 @@ export function PartsTable() {
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-52">
                   <ContextMenuItem onClick={() => setActivePart(row.original)}>
-                    <Pencil /> Open details
+                    <Eye /> Open details
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => toast.info("Where used", `${row.original.whereUsedCount} project BOMs reference ${row.original.partNumber}`)}>
+                  <ContextMenuItem onClick={() => setEditPart(row.original)}>
+                    <Pencil /> Edit material
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => setActivePart(row.original)}>
                     <Network /> Where used
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => toast.success("Duplicated", `${row.original.partNumber} cloned as draft`)}>
+                  <ContextMenuItem onClick={() => duplicatePart(row.original)}>
                     <Copy /> Duplicate
                   </ContextMenuItem>
-                  <ContextMenuItem onClick={() => toast.info("Compare", "Select a second part to compare")}>
-                    <GitCompare /> Compare revisions
+                  <ContextMenuItem onClick={() => { copyToClipboard(row.original.partNumber); toast.success("Copied", row.original.partNumber); }}>
+                    <GitCompare /> Copy part number
                   </ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem destructive onClick={() => toast.error("Archive part", `${row.original.partNumber} moved to archive`)}>
+                  <ContextMenuItem destructive onClick={() => archivePart(row.original)}>
                     <Trash2 /> Archive
                   </ContextMenuItem>
                 </ContextMenuContent>
@@ -413,13 +504,13 @@ export function PartsTable() {
           <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-border bg-surface-overlay/95 px-3 py-2 shadow-lg backdrop-blur-xl">
             <span className="px-1 text-[13px] font-medium">{selectedCount} selected</span>
             <div className="h-5 w-px bg-border" />
-            <Button size="xs" variant="ghost" onClick={() => toast.success("Bulk edit", `Editing ${selectedCount} parts`)}>
+            <Button size="xs" variant="ghost" onClick={() => { const s = selectedParts(); if (s[0]) setEditPart(s[0]); }}>
               <Pencil className="size-3.5" /> Edit
             </Button>
-            <Button size="xs" variant="ghost" onClick={() => toast.info("Export", `${selectedCount} parts`)}>
+            <Button size="xs" variant="ghost" onClick={() => exportRows(selectedParts(), "selection")}>
               <Download className="size-3.5" /> Export
             </Button>
-            <Button size="xs" variant="ghost" onClick={() => toast.success("Lifecycle", "Promoted to Released")}>
+            <Button size="xs" variant="ghost" onClick={promoteSelected}>
               <Check className="size-3.5" /> Promote
             </Button>
             <div className="h-5 w-px bg-border" />
@@ -430,7 +521,14 @@ export function PartsTable() {
         </div>
       )}
 
-      <PartDetailDrawer part={activePart} onClose={() => setActivePart(null)} />
+      <PartDetailDrawer
+        part={activePart}
+        onClose={() => setActivePart(null)}
+        onEdit={(part) => {
+          setActivePart(null);
+          setEditPart(part);
+        }}
+      />
 
       <CreatePartDialog
         open={createPartOpen}
@@ -438,6 +536,22 @@ export function PartsTable() {
         onCreate={(part) => {
           setExtraParts((prev) => [part, ...prev]);
           if (parentRef.current) parentRef.current.scrollTo({ top: 0 });
+        }}
+      />
+
+      <EditPartDialog
+        part={editPart}
+        onOpenChange={(open) => !open && setEditPart(null)}
+        onSave={(patch) => {
+          if (!editPart) return;
+          const inExtra = extraParts.some((p) => p.id === editPart.id);
+          if (inExtra) {
+            setExtraParts((prev) => prev.map((p) => (p.id === editPart.id ? { ...p, ...patch } : p)));
+          } else {
+            // Seeded parts live in the mock db array — patch in place, then force a re-render.
+            Object.assign(editPart, patch);
+            setRev((r) => r + 1);
+          }
         }}
       />
     </div>

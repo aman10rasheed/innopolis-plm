@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
   Package,
   Pin,
@@ -48,6 +49,7 @@ function teamFor(p: Product): string[] {
 }
 
 export function ProjectsView() {
+  const router = useRouter();
   const products = db().products;
   const activities = db().activities.slice(0, 12);
   const pinned = useUIStore((s) => s.pinnedProjects);
@@ -80,7 +82,7 @@ export function ProjectsView() {
                     const team = teamFor(p);
                     const isPinned = pinned.includes(p.id);
                     return (
-                      <Card key={p.id} interactive className="p-4" onClick={() => toast.info(p.name, p.code)}>
+                      <Card key={p.id} interactive className="p-4" onClick={() => router.push(`/project-details?p=${p.id}`)}>
                         <div className="flex items-start gap-3">
                           <Thumbnail hue={p.thumbnailHue} size={44} icon={Package} />
                           <div className="min-w-0 flex-1">

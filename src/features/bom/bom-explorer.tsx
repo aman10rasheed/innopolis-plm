@@ -43,12 +43,14 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Thumbnail } from "@/components/shared/thumbnail";
 import { DonutChart } from "@/components/shared/charts";
-import { buildProjectBom, flattenBom, rootProjects, addProjectBomLine, db } from "@/mock/db";
+import { useRouter } from "next/navigation";
+import { buildProjectBom, flattenBom, rootProjects, addProjectBomLine, whereUsed, db } from "@/mock/db";
 import type { BomNode } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
 import { formatCurrency, formatNumber, cn } from "@/lib/utils";
 import { LIFECYCLE_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
+import { downloadCsv, copyToClipboard } from "@/lib/export";
 
 const ROOTS = rootProjects();
 const LEVEL_COLORS = [
@@ -61,6 +63,8 @@ const LEVEL_COLORS = [
 ];
 
 export function BomExplorer() {
+  const router = useRouter();
+  const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
   const [rootIdx, setRootIdx] = React.useState(0);
   const root = ROOTS[rootIdx]!;
   // bumped whenever a BOM line is added so the memoized tree rebuilds
@@ -147,6 +151,62 @@ export function BomExplorer() {
       return next;
     });
 
+  const exportBom = () => {
+    const rows = flattenBom(tree!, new Set(allIds)).filter((n) => n.id !== "root");
+    downloadCsv(
+      rows,
+      [
+        { header: "Level", value: (n) => n.level },
+        { header: "Ref Des", value: (n) => n.refDesignator ?? "" },
+        { header: "Part Number", value: (n) => n.partNumber },
+        { header: "Name", value: (n) => n.name },
+        { header: "Qty", value: (n) => n.quantity },
+        { header: "Unit Cost", value: (n) => Math.round(n.unitCost) },
+        { header: "Extended Cost", value: (n) => Math.round(n.extendedCost) },
+        { header: "Lead Time (days)", value: (n) => (n.type === "part" ? n.leadTimeDays : "") },
+        { header: "Procurement", value: (n) => n.procurement ?? "" },
+        { header: "Lifecycle", value: (n) => n.lifecycle ?? "" },
+      ],
+      `bom-${root.projectNumber ?? root.id}-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+    toast.success("BOM exported", `${rows.length} lines downloaded as CSV`);
+  };
+
+  const showWhereUsed = (node: BomNode) => {
+    const uses = whereUsed(node.refId);
+    toast.info(
+      "Where used",
+      uses.length
+        ? `${node.partNumber} is used in ${uses.length} project BOM(s)`
+        : `${node.partNumber} is not referenced in any other BOM`,
+    );
+  };
+
+  // Map currently-selected node ids → their underlying part refIds.
+  const selectedRefIds = () => {
+    const byId = new Map(flattenBom(tree!, new Set(allIds)).map((n) => [n.id, n.refId]));
+    return new Set([...selected].map((id) => byId.get(id)).filter(Boolean) as string[]);
+  };
+
+  const massEditQty = () => {
+    const refIds = selectedRefIds();
+    const input = window.prompt(`Set quantity for ${selected.size} selected line(s):`, "1");
+    if (input == null) return;
+    const qty = Math.max(0, Math.round(Number(input)));
+    if (!Number.isFinite(qty)) {
+      toast.error("Invalid quantity", "Enter a whole number");
+      return;
+    }
+    const edges = db().projectBomLines[root.id] ?? [];
+    let changed = 0;
+    edges.forEach((e) => {
+      if (refIds.has(e.refId)) { e.qty = qty; changed++; }
+    });
+    setVersion((v) => v + 1);
+    setSelected(new Set());
+    toast.success("Quantities updated", `${changed} BOM line(s) set to qty ${qty}`);
+  };
+
   if (!tree || !stats) return null;
 
   return (
@@ -196,7 +256,7 @@ export function BomExplorer() {
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setExpanded(new Set(["root"]))}>
               <ChevronsDownUp className="size-3.5" /> Collapse
             </Button>
-            <Button variant="outline" size="icon-sm" onClick={() => toast.success("Export BOM", "Indented BOM exported as XLSX")}>
+            <Button variant="outline" size="icon-sm" onClick={exportBom} title="Export indented BOM as CSV">
               <Download className="size-3.5" />
             </Button>
           </div>
@@ -299,10 +359,10 @@ export function BomExplorer() {
                 </ContextMenuTrigger>
                 <ContextMenuContent className="w-48">
                   <ContextMenuItem onClick={() => setActiveNode(node)}><Package /> Inspect</ContextMenuItem>
-                  <ContextMenuItem onClick={() => toast.info("Where used", `${node.partNumber}`)}><Network /> Where used</ContextMenuItem>
-                  <ContextMenuItem onClick={() => toast.info("Compare", "Pick a revision to diff")}><GitCompare /> Compare revision</ContextMenuItem>
+                  <ContextMenuItem onClick={() => showWhereUsed(node)}><Network /> Where used</ContextMenuItem>
+                  <ContextMenuItem onClick={() => router.push("/revisions")}><GitCompare /> Compare revision</ContextMenuItem>
                   <ContextMenuSeparator />
-                  <ContextMenuItem onClick={() => toast.success("Copied", node.partNumber)}><Copy /> Copy part number</ContextMenuItem>
+                  <ContextMenuItem onClick={() => { copyToClipboard(node.partNumber); toast.success("Copied", node.partNumber); }}><Copy /> Copy part number</ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
             );
@@ -313,8 +373,8 @@ export function BomExplorer() {
           <div className="flex items-center gap-2 border-t border-border bg-surface/60 px-4 py-2">
             <span className="text-[13px] font-medium">{selected.size} selected</span>
             <div className="h-4 w-px bg-border" />
-            <Button size="xs" variant="ghost" onClick={() => toast.success("Mass edit", `${selected.size} lines`)}>Mass edit qty</Button>
-            <Button size="xs" variant="ghost" onClick={() => toast.info("Substitute", "Choose replacement part")}>Substitute</Button>
+            <Button size="xs" variant="ghost" onClick={massEditQty}>Mass edit qty</Button>
+            <Button size="xs" variant="ghost" onClick={() => setBomAddComponentOpen(true)}>Substitute</Button>
             <Button size="xs" variant="ghost" className="ml-auto" onClick={() => setSelected(new Set())}>Clear</Button>
           </div>
         )}

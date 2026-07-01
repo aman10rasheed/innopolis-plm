@@ -43,6 +43,7 @@ import {
 import { cn, formatCompactCurrency, formatDate } from "@/lib/utils";
 import { BOM_STAGE_COLOR, BOM_STAGE_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
+import { useUIStore } from "@/stores/ui-store";
 
 const BOM_TYPES: ProjectBom["bomType"][] = ["Engineering", "Procurement", "Final Released"];
 const REVS = ["A", "B", "C", "D"];
@@ -51,6 +52,7 @@ const nowISO = () => new Date().toISOString();
 
 export function BomApprovalsBoard() {
   const [boms, setBoms] = React.useState<ProjectBom[]>(() => db().projectBoms.slice());
+  const typeFilter = useUIStore((s) => s.boardFilters["bomApprovals"] ?? "");
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [overCol, setOverCol] = React.useState<BomStage | null>(null);
   const [editId, setEditId] = React.useState<string | null>(null);
@@ -131,7 +133,7 @@ export function BomApprovalsBoard() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-full min-h-0 gap-3 overflow-x-auto p-4">
         {BOM_STAGES.map((col) => {
-          const items = boms.filter((b) => b.stage === col);
+          const items = boms.filter((b) => b.stage === col && (!typeFilter || b.bomType === typeFilter));
           const value = items.reduce((s, b) => s + b.totalValue, 0);
           return (
             <div

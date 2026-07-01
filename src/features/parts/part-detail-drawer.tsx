@@ -24,7 +24,7 @@ import { getSupplier, getProduct, whereUsed, db } from "@/mock/db";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import { LIFECYCLE_VARIANT, AVAILABILITY_VARIANT } from "@/constants/status";
 
-export function PartDetailDrawer({ part, onClose }: { part: Part | null; onClose: () => void }) {
+export function PartDetailDrawer({ part, onClose, onEdit }: { part: Part | null; onClose: () => void; onEdit?: (part: Part) => void }) {
   return (
     <AnimatePresence>
       {part && (
@@ -43,7 +43,7 @@ export function PartDetailDrawer({ part, onClose }: { part: Part | null; onClose
             transition={{ type: "spring", stiffness: 360, damping: 36 }}
             className="fixed right-0 top-0 z-[141] flex h-full w-[480px] flex-col border-l border-border bg-surface-overlay shadow-lg"
           >
-            <PartDrawerBody part={part} onClose={onClose} />
+            <PartDrawerBody part={part} onClose={onClose} onEdit={onEdit} />
           </motion.aside>
         </>
       )}
@@ -51,7 +51,7 @@ export function PartDetailDrawer({ part, onClose }: { part: Part | null; onClose
   );
 }
 
-function PartDrawerBody({ part, onClose }: { part: Part; onClose: () => void }) {
+function PartDrawerBody({ part, onClose, onEdit }: { part: Part; onClose: () => void; onEdit?: (part: Part) => void }) {
   const supplier = getSupplier(part.supplierId);
   const usages = whereUsed(part.id);
   const revs = db().revisions.filter((r) => r.itemId === part.id).slice(0, 6);
@@ -79,7 +79,7 @@ function PartDrawerBody({ part, onClose }: { part: Part; onClose: () => void }) 
           </Button>
         </div>
         <div className="mt-3 flex gap-2">
-          <Button size="sm" className="flex-1">
+          <Button size="sm" className="flex-1" onClick={() => onEdit?.(part)}>
             <Pencil className="size-3.5" /> Edit
           </Button>
           <Button size="sm" variant="outline" className="flex-1">

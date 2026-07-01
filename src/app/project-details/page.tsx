@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProjectInvoice } from "@/features/project-details/project-invoice";
 import { toast } from "@/components/ui/toast";
+import { downloadJson } from "@/lib/export";
 
 export default function ProjectDetailsPage() {
   const projects = db().products;
@@ -43,7 +44,14 @@ export default function ProjectDetailsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => toast.success("Exported", "Proforma saved to Documents")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              downloadJson(project, `proforma-${project.projectNumber}.json`);
+              toast.success("Exported", `${project.projectNumber} proforma downloaded`);
+            }}
+          >
             <Download className="size-4" /> Export
           </Button>
           <Button size="sm" onClick={() => window.print()}>

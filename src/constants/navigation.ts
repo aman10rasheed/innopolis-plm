@@ -17,6 +17,7 @@ import {
   BarChart3,
   Settings,
   Building2,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/auth/credentials";
@@ -81,6 +82,10 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Insights",
     items: [{ label: "Reports", href: "/reports", icon: FileBarChart, roles: ["Administrator", "Commercial", "Management", "Purchase"] }],
   },
+  {
+    label: "Administration",
+    items: [{ label: "User Management", href: "/users", icon: Users, roles: ["Administrator"] }],
+  },
 ];
 
 export const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
@@ -91,9 +96,16 @@ export const SETTINGS_ITEM: NavItem = {
   icon: Settings,
 };
 
+/** Detail/sub-routes that aren't sidebar items but still need role gating. */
+const EXTRA_ROUTE_ROLES: { prefix: string; roles: Role[] }[] = [
+  { prefix: "/user-details", roles: ["Administrator"] },
+];
+
 /** Whether a role may visit a path (Administrator sees all). */
 export function canAccess(role: Role, pathname: string): boolean {
   if (role === "Administrator") return true;
+  const extra = EXTRA_ROUTE_ROLES.find((e) => pathname.startsWith(e.prefix));
+  if (extra) return extra.roles.includes(role);
   const item = ALL_NAV_ITEMS.find((i) =>
     i.href === "/" ? pathname === "/" : pathname.startsWith(i.href),
   );

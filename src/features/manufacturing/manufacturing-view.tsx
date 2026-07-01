@@ -8,10 +8,10 @@ import { StatusDot } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { MultiBar, LineTrend } from "@/components/shared/charts";
 import { cn, formatNumber, formatDate, seededRandom, pick } from "@/lib/utils";
 import { manufacturingProgress, monthlySeries } from "@/mock/series";
-import { toast } from "@/components/ui/toast";
 
 type WoStatus = "Queued" | "In Progress" | "Completed" | "On Hold";
 
@@ -100,6 +100,8 @@ function buildMachines(workOrders: WorkOrder[]): Machine[] {
 export function ManufacturingView() {
   const workOrders = React.useMemo(() => buildWorkOrders(), []);
   const machines = React.useMemo(() => buildMachines(workOrders), [workOrders]);
+  const [activeWo, setActiveWo] = React.useState<(typeof workOrders)[number] | null>(null);
+  const [activeMachine, setActiveMachine] = React.useState<(typeof machines)[number] | null>(null);
   const progressData = React.useMemo(() => manufacturingProgress(), []);
   const throughput = React.useMemo(() => {
     const a = monthlySeries(5, 900, 30, 300);
@@ -149,7 +151,7 @@ export function ManufacturingView() {
               <Card
                 key={m.name}
                 interactive
-                onClick={() => toast.info(m.name, `${m.status} · OEE ${m.oee}%`)}
+                onClick={() => setActiveMachine(m)}
                 className="p-3.5"
               >
                 <div className="flex items-center justify-between">
@@ -207,7 +209,7 @@ export function ManufacturingView() {
                   <tr
                     key={w.id}
                     className="cursor-pointer transition-colors hover:bg-accent/40"
-                    onClick={() => toast.info(w.number, `${w.itemName} · ${formatNumber(w.qty)} units`)}
+                    onClick={() => setActiveWo(w)}
                   >
                     <td className="px-3 py-2.5 font-mono text-2xs text-muted-foreground">{w.number}</td>
                     <td className="px-3 py-2.5">
@@ -239,6 +241,58 @@ export function ManufacturingView() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={!!activeWo} onOpenChange={(o) => !o && setActiveWo(null)}>
+        <DialogContent>
+          {activeWo && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-mono">{activeWo.number}</DialogTitle>
+                <DialogDescription>{activeWo.itemName} · {activeWo.itemCode}</DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border text-[13px]">
+                {[
+                  ["Status", activeWo.status],
+                  ["Priority", activeWo.priority],
+                  ["Quantity", formatNumber(activeWo.qty)],
+                  ["Progress", `${activeWo.progress}%`],
+                  ["Station", activeWo.station],
+                  ["Due", formatDate(activeWo.dueDate)],
+                ].map(([k, v]) => (
+                  <div key={k} className="bg-surface p-3">
+                    <p className="text-2xs text-muted-foreground">{k}</p>
+                    <p className="mt-0.5 font-medium">{v}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!activeMachine} onOpenChange={(o) => !o && setActiveMachine(null)}>
+        <DialogContent>
+          {activeMachine && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-mono">{activeMachine.name}</DialogTitle>
+                <DialogDescription>{activeMachine.status}</DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border text-[13px]">
+                {[
+                  ["Status", activeMachine.status],
+                  ["OEE", `${activeMachine.oee}%`],
+                ].map(([k, v]) => (
+                  <div key={k} className="bg-surface p-3">
+                    <p className="text-2xs text-muted-foreground">{k}</p>
+                    <p className="mt-0.5 font-medium">{v}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </ScrollArea>
   );
 }

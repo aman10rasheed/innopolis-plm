@@ -36,6 +36,12 @@ export function setUnauthorizedHandler(fn: () => void) {
   unauthorizedHandler = fn;
 }
 
+/** Called on a 403 PASSWORD_CHANGE_REQUIRED so the app can show the set-password gate. */
+let passwordChangeHandler: (() => void) | null = null;
+export function setPasswordChangeHandler(fn: () => void) {
+  passwordChangeHandler = fn;
+}
+
 export interface ApiMeta {
   page: number;
   pageSize: number;
@@ -49,16 +55,20 @@ export interface ApiEnvelope<T> {
   data: T;
   meta?: ApiMeta;
   error?: string;
+  code?: string;
 }
 
 export class ApiError extends Error {
   status: number;
   payload: unknown;
-  constructor(status: number, message: string, payload?: unknown) {
+  /** Machine-readable code from the backend (e.g. "PASSWORD_CHANGE_REQUIRED"). */
+  code?: string;
+  constructor(status: number, message: string, payload?: unknown, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
+    this.code = code;
   }
 }
 
@@ -117,8 +127,14 @@ export async function apiFetch<T>(
     }
     throw new ApiError(401, json?.error ?? json?.message ?? "Unauthorized", json);
   }
+  // Forced-password-change gate: a restricted token hits a guarded endpoint.
+  // Surface the code so the app can route to the set-password screen — DON'T logout.
+  if (res.status === 403 && json?.code === "PASSWORD_CHANGE_REQUIRED") {
+    passwordChangeHandler?.();
+    throw new ApiError(403, json?.error ?? "Password change required", json, json.code);
+  }
   if (!res.ok || !json || json.success === false) {
-    throw new ApiError(res.status, json?.error ?? json?.message ?? res.statusText, json);
+    throw new ApiError(res.status, json?.error ?? json?.message ?? res.statusText, json, json?.code);
   }
   return json;
 }

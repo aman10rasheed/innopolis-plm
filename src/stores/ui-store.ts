@@ -32,7 +32,14 @@ interface UIState {
   cadModel: { name: string; format: string } | null;
   // Pinned / favorites
   pinnedProjects: string[];
+  // Bumped whenever the in-memory mock db is mutated outside React (e.g. CSV import),
+  // so views that read db() directly can re-render.
+  dataRev: number;
+  // Reactive per-board quick filters (key → selected value, "" = All).
+  boardFilters: Record<string, string>;
   // Actions
+  bumpDataRev: () => void;
+  setBoardFilter: (key: string, value: string) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (v: boolean) => void;
   toggleInspector: () => void;
@@ -88,6 +95,8 @@ export const useUIStore = create<UIState>()(
       cadImportOpen: false,
       cadModel: null,
       pinnedProjects: ["PR-1", "PR-2", "PR-3"],
+      dataRev: 0,
+      boardFilters: {},
 
       toggleSidebar: () =>
         set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -117,6 +126,8 @@ export const useUIStore = create<UIState>()(
       setBomAddComponentOpen: (v) => set({ bomAddComponentOpen: v }),
       setCadImportOpen: (v) => set({ cadImportOpen: v }),
       setCadModel: (m) => set({ cadModel: m }),
+      bumpDataRev: () => set((s) => ({ dataRev: s.dataRev + 1 })),
+      setBoardFilter: (key, value) => set((s) => ({ boardFilters: { ...s.boardFilters, [key]: value } })),
       togglePin: (id) =>
         set((s) => ({
           pinnedProjects: s.pinnedProjects.includes(id)

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CadViewer } from "@/features/cad/cad-viewer";
 import { useUIStore } from "@/stores/ui-store";
 import { toast } from "@/components/ui/toast";
+import { copyToClipboard, shareUrl } from "@/lib/export";
 
 export default function CadPage() {
   const setCadImportOpen = useUIStore((s) => s.setCadImportOpen);
@@ -17,7 +18,14 @@ export default function CadPage() {
         icon={Box}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => toast.info("Share", "View link copied")}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const ok = await copyToClipboard(shareUrl("/cad"));
+                ok ? toast.success("Link copied", "Shareable CAD view link is on your clipboard") : toast.error("Copy failed");
+              }}
+            >
               <Share2 className="size-4" /> Share view
             </Button>
             <Button size="sm" onClick={() => setCadImportOpen(true)}>

@@ -12,8 +12,9 @@ import {
   ArrowRight,
   FileClock,
 } from "lucide-react";
-import { db, getUser } from "@/mock/db";
+import { db, getUser, addRevision } from "@/mock/db";
 import type { Revision } from "@/types";
+import { useUIStore } from "@/stores/ui-store";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,6 +148,8 @@ const DIFF_FIELDS: DiffField[] = [
 ];
 
 function ComparePanel() {
+  const dataRev = useUIStore((s) => s.dataRev);
+  const bumpDataRev = useUIStore((s) => s.bumpDataRev);
   const revisions = db().revisions;
   const items = React.useMemo(() => {
     const byItem = new Map<string, { id: string; label: string; revs: Revision[] }>();
@@ -155,7 +158,8 @@ function ComparePanel() {
       byItem.get(r.itemId)!.revs.push(r);
     }
     return [...byItem.values()].filter((i) => i.revs.length >= 2).slice(0, 60);
-  }, [revisions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revisions, dataRev]);
 
   const [itemId, setItemId] = React.useState<string>(items[0]?.id ?? "");
   const item = items.find((i) => i.id === itemId);
@@ -250,7 +254,26 @@ function ComparePanel() {
                 size="sm"
                 variant="outline"
                 className="w-full gap-1.5"
-                onClick={() => toast.success("Revision restored", `${item?.label} reverted to Rev ${from.revision}`)}
+                onClick={() => {
+                  if (!from || !item) return;
+                  addRevision({
+                    id: `rev-restore-${Date.now()}`,
+                    itemId: item.id,
+                    itemPartNumber: from.itemPartNumber,
+                    itemName: from.itemName,
+                    revision: from.revision,
+                    status: "Working",
+                    authorId: db().users[0]!.id,
+                    date: new Date().toISOString(),
+                    changeSummary: `Restored to Rev ${from.revision}`,
+                    changedFields: 0,
+                    added: 0,
+                    removed: 0,
+                    modified: 0,
+                  });
+                  bumpDataRev();
+                  toast.success("Revision restored", `${item.label} reverted to Rev ${from.revision}`);
+                }}
               >
                 <RotateCcw className="size-3.5" /> Restore Rev {from.revision}
               </Button>

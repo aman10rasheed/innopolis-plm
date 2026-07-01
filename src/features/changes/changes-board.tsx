@@ -41,6 +41,7 @@ import {
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { ECO_STATUS_COLOR, PRIORITY_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
+import { useUIStore } from "@/stores/ui-store";
 
 const COLUMNS: EcoStatus[] = ["Draft", "Review", "Approved", "Released", "Completed"];
 const PRIORITIES: EcoPriority[] = ["Low", "Medium", "High", "Critical"];
@@ -49,6 +50,7 @@ const rnd = (n: number) => Math.floor(Math.random() * n);
 
 export function ChangesBoard() {
   const [ecos, setEcos] = React.useState<Eco[]>(() => db().ecos.slice());
+  const priorityFilter = useUIStore((s) => s.boardFilters["changes"] ?? "");
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [overCol, setOverCol] = React.useState<EcoStatus | null>(null);
   const [editId, setEditId] = React.useState<string | null>(null);
@@ -134,7 +136,7 @@ export function ChangesBoard() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-full min-h-0 gap-3 overflow-x-auto p-4">
         {COLUMNS.map((col) => {
-          const items = ecos.filter((e) => e.status === col);
+          const items = ecos.filter((e) => e.status === col && (!priorityFilter || e.priority === priorityFilter));
           const cost = items.reduce((s, e) => s + e.costImpact, 0);
           return (
             <div

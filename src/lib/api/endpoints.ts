@@ -5,7 +5,7 @@
 
 import { req, reqList, type Query } from "./client";
 import type {
-  ApiAuthResponse, ApiUser,
+  ApiAuthResponse, ApiUser, ApiUserFull, ApiCreateUserInput, ApiResetPasswordResponse,
   ApiCategory, ApiSubtype, ApiMajorSpec, ApiGrade, ApiUnit,
   ApiPart, ApiPartInput,
   ApiSupplier,
@@ -23,6 +23,20 @@ export const api = {
     login: (email: string, password: string) =>
       req<ApiAuthResponse>("/auth/login", { method: "POST", body: { email, password }, auth: false }),
     me: () => req<ApiUser>("/auth/me"),
+    /** Forced first-login change — returns a fresh, unrestricted token. */
+    setPassword: (current_password: string, new_password: string) =>
+      req<ApiAuthResponse>("/auth/set-password", { method: "POST", body: { current_password, new_password } }),
+  },
+
+  /* ---- User management (Administrator only) ---- */
+  users: {
+    list: (query?: Query) => reqList<ApiUserFull>("/users", { query }),
+    get: (id: string) => req<ApiUserFull>(`/users/${id}`),
+    create: (body: ApiCreateUserInput) => req<ApiUserFull>("/users", { method: "POST", body }),
+    update: (id: string, body: Partial<ApiUserFull>) => req<ApiUserFull>(`/users/${id}`, { method: "PATCH", body }),
+    resetPassword: (id: string, temporary_password?: string) =>
+      req<ApiResetPasswordResponse>(`/users/${id}/reset-password`, { method: "POST", body: temporary_password ? { temporary_password } : {} }),
+    remove: (id: string) => req<{ message: string }>(`/users/${id}`, { method: "DELETE" }),
   },
 
   /* ---- Module 1: Material Master masters ---- */

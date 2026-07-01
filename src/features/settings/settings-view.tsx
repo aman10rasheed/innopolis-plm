@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { cn, formatNumber } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
+import { downloadCsv } from "@/lib/export";
 
 type Section =
   | "Profile"
@@ -128,7 +129,20 @@ function ProfileSection() {
             </AvatarFallback>
           </Avatar>
           <div>
-            <Button size="sm" variant="outline" onClick={() => toast.success("Avatar updated")}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "image/*";
+                input.onchange = () => {
+                  const file = input.files?.[0];
+                  if (file) toast.success("Avatar updated", file.name);
+                };
+                input.click();
+              }}
+            >
               Change avatar
             </Button>
             <p className="mt-1.5 text-2xs text-muted-foreground">JPG, GIF or PNG. 2MB max.</p>
@@ -154,14 +168,24 @@ function ProfileSection() {
         <Button variant="outline" onClick={() => toast.message("Changes discarded")}>
           Cancel
         </Button>
-        <Button onClick={() => toast.success("Profile saved", `${name} · ${role}`)}>Save changes</Button>
+        <Button
+          onClick={() => {
+            me.name = name;
+            me.initials = name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || me.initials;
+            toast.success("Profile saved", `${name} · ${role}`);
+          }}
+        >
+          Save changes
+        </Button>
       </div>
     </div>
   );
 }
 
 function WorkspaceSection() {
-  const [wsName, setWsName] = React.useState("Innopolis Robotics");
+  const [wsName, setWsName] = React.useState(
+    () => (typeof window !== "undefined" && localStorage.getItem("innopolis:workspaceName")) || "Innopolis Robotics",
+  );
   const [region, setRegion] = React.useState("us-east");
   return (
     <div className="space-y-6">
@@ -199,7 +223,14 @@ function WorkspaceSection() {
         </div>
       </Card>
       <div className="flex justify-end">
-        <Button onClick={() => toast.success("Workspace saved", wsName)}>Save changes</Button>
+        <Button
+          onClick={() => {
+            localStorage.setItem("innopolis:workspaceName", wsName);
+            toast.success("Workspace saved", wsName);
+          }}
+        >
+          Save changes
+        </Button>
       </div>
     </div>
   );
@@ -403,7 +434,18 @@ function MembersSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <SectionHeader title="Members" description={`${users.length} people in this workspace.`} />
-        <Button size="sm" onClick={() => toast.success("Invite sent")}>
+        <Button
+          size="sm"
+          onClick={() => {
+            const email = window.prompt("Invite a teammate — enter their email:");
+            if (email == null) return;
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+              toast.error("Invalid email", "Enter a valid email address");
+              return;
+            }
+            toast.success("Invite sent", `Invitation emailed to ${email.trim()}`);
+          }}
+        >
           Invite member
         </Button>
       </div>
@@ -589,10 +631,37 @@ function BillingSection() {
         </div>
 
         <div className="mt-5 flex gap-2">
-          <Button variant="outline" onClick={() => toast.message("Opening invoices")}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              downloadCsv(
+                [
+                  { no: "INV-2026-003", date: "2026-06-01", amount: 4800, status: "Paid" },
+                  { no: "INV-2026-002", date: "2026-05-01", amount: 4800, status: "Paid" },
+                  { no: "INV-2026-001", date: "2026-04-01", amount: 4800, status: "Paid" },
+                ],
+                [
+                  { header: "Invoice", value: (r) => r.no },
+                  { header: "Date", value: (r) => r.date },
+                  { header: "Amount (USD)", value: (r) => r.amount },
+                  { header: "Status", value: (r) => r.status },
+                ],
+                "invoices.csv",
+              );
+              toast.success("Invoices exported", "3 invoices downloaded as CSV");
+            }}
+          >
             View invoices
           </Button>
-          <Button onClick={() => toast.success("Plan", "Upgrade requested")}>Manage plan</Button>
+          <Button
+            onClick={() => {
+              if (window.confirm("Request an upgrade to the Enterprise plan?")) {
+                toast.success("Upgrade requested", "Our team will reach out within 1 business day");
+              }
+            }}
+          >
+            Manage plan
+          </Button>
         </div>
       </Card>
     </div>

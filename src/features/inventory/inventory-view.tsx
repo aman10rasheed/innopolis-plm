@@ -61,7 +61,22 @@ export function InventoryView() {
   const [status, setStatus] = React.useState<"all" | Availability>("all");
   const [activeWh, setActiveWh] = React.useState<string | null>(null);
   const [detailWh, setDetailWh] = React.useState<Warehouse | null>(null);
+  const [reordered, setReordered] = React.useState<Set<string>>(() => new Set());
   const setCreateWarehouseOpen = useUIStore((s) => s.setCreateWarehouseOpen);
+
+  const reorder = (ids: string[], label: string) => {
+    const fresh = ids.filter((id) => !reordered.has(id));
+    if (!fresh.length) {
+      toast.info("Already queued", "Those lines are already on a replenishment order");
+      return;
+    }
+    setReordered((prev) => {
+      const next = new Set(prev);
+      fresh.forEach((id) => next.add(id));
+      return next;
+    });
+    toast.success("Replenishment queued", label);
+  };
 
   const series = React.useMemo(() => {
     const incoming = monthlySeries(101, 4200, 60, 900);
@@ -207,7 +222,7 @@ export function InventoryView() {
                 variant="outline"
                 size="xs"
                 className="ml-auto"
-                onClick={() => toast.success("Reorder batch created", `${Math.min(alerts.length, 10)} replenishment lines queued`)}
+                onClick={() => reorder(alerts.map((a) => a.id), `${alerts.length} replenishment line(s) queued`)}
               >
                 <PackagePlus className="size-3.5" /> Reorder all
               </Button>
@@ -230,9 +245,11 @@ export function InventoryView() {
                   <Badge variant={AVAILABILITY_VARIANT[r.status]}>{r.status}</Badge>
                   <Button
                     size="xs"
-                    onClick={() => toast.success("Reorder placed", `${r.partNumber} → ${r.warehouseCode}`)}
+                    variant={reordered.has(r.id) ? "outline" : "default"}
+                    disabled={reordered.has(r.id)}
+                    onClick={() => reorder([r.id], `${r.partNumber} → ${r.warehouseCode}`)}
                   >
-                    Reorder
+                    {reordered.has(r.id) ? "Queued" : "Reorder"}
                   </Button>
                 </div>
               ))}

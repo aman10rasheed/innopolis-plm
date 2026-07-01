@@ -1,11 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { Network, Plus, GitCompare } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { BomExplorer } from "@/features/bom/bom-explorer";
 import { useUIStore } from "@/stores/ui-store";
-import { toast } from "@/components/ui/toast";
 
 export default function BomPage() {
   const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
@@ -17,8 +17,8 @@ export default function BomPage() {
         icon={Network}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => toast.info("Compare", "Select two revisions to diff")}>
-              <GitCompare className="size-4" /> Compare revisions
+            <Button asChild variant="outline" size="sm">
+              <Link href="/revisions"><GitCompare className="size-4" /> Compare revisions</Link>
             </Button>
             <Button size="sm" onClick={() => setBomAddComponentOpen(true)}>
               <Plus className="size-4" /> Add component

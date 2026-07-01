@@ -27,8 +27,14 @@ const tone: Record<Notification["type"], string> = {
 
 export function NotificationCenter() {
   const { notificationsOpen, setNotificationsOpen } = useUIStore();
+  const dataRev = useUIStore((s) => s.dataRev);
   const [items, setItems] = React.useState(() => db().notifications);
   const [filter, setFilter] = React.useState<"all" | "unread">("all");
+
+  // Re-sync from the db when the panel opens or new notifications are posted.
+  React.useEffect(() => {
+    if (notificationsOpen) setItems([...db().notifications]);
+  }, [notificationsOpen, dataRev]);
 
   const shown = filter === "unread" ? items.filter((n) => !n.read) : items;
   const unread = items.filter((n) => !n.read).length;

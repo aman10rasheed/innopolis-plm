@@ -10,7 +10,8 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { api } from "./endpoints";
 import type { Query } from "./client";
 import * as m from "./mappers";
-import type { ApiPartInput } from "./types";
+import type { ApiPartInput, ApiUserFull, ApiCreateUserInput } from "./types";
+import { useAuthStore } from "@/stores/auth-store";
 
 export const qk = {
   masters: ["masters"] as const,
@@ -33,6 +34,8 @@ export const qk = {
   alerts: ["inventory", "alerts"] as const,
   warehouses: ["warehouses"] as const,
   dashboard: ["dashboard"] as const,
+  users: (f?: Query) => ["users", f ?? {}] as const,
+  user: (id: string) => ["user", id] as const,
 };
 
 /* ---- Material Master masters (for the create-material dropdowns) ---- */
@@ -240,3 +243,58 @@ export const useWarehouses = () =>
 /* ---- Dashboard ---- */
 export const useDashboard = () =>
   useQuery({ queryKey: qk.dashboard, queryFn: () => api.reports.dashboard() });
+
+/* ---- User management (Administrator only) ---- */
+export const useUsers = (filters?: Query) =>
+  useQuery({
+    queryKey: qk.users(filters),
+    queryFn: async () => {
+      const { items, meta } = await api.users.list(filters);
+      return { items, meta };
+    },
+    placeholderData: keepPreviousData,
+  });
+export const useUser = (id: string) =>
+  useQuery({ queryKey: qk.user(id), queryFn: () => api.users.get(id), enabled: !!id });
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApiCreateUserInput) => api.users.create(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+export function useUpdateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<ApiUserFull> }) => api.users.update(id, body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: qk.user(v.id) });
+    },
+  });
+}
+export function useResetPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, temporaryPassword }: { id: string; temporaryPassword?: string }) =>
+      api.users.resetPassword(id, temporaryPassword),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: qk.user(v.id) });
+    },
+  });
+}
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.users.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+/** Forced first-login password change — delegates to the auth store (token swap + gate clear). */
+export function useSetPassword() {
+  return useMutation({
+    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
+      useAuthStore.getState().setPassword(currentPassword, newPassword),
+  });
+}

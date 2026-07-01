@@ -53,6 +53,7 @@ import {
 } from "@/lib/utils";
 import { supplierPerfSeries } from "@/mock/series";
 import { toast } from "@/components/ui/toast";
+import { downloadJson, downloadText } from "@/lib/export";
 
 const STATUS_VARIANT: Record<Supplier["status"], "success" | "info" | "warning" | "muted"> = {
   Preferred: "success",
@@ -547,10 +548,44 @@ function SupplierDrawerBody({ supplier, onClose }: { supplier: Supplier; onClose
                 </p>
               </div>
               <div className="mt-3 flex gap-2">
-                <Button size="xs" onClick={() => toast.success("Message sent", `Reached out to ${supplier.contact}`)}>
+                <Button
+                  size="xs"
+                  onClick={() => {
+                    window.location.href = `mailto:${supplier.email}?subject=${encodeURIComponent(`Innopolis — ${supplier.name}`)}`;
+                    toast.success("Opening mail", `Composing to ${supplier.contact}`);
+                  }}
+                >
                   <Mail className="size-3.5" /> Contact
                 </Button>
-                <Button size="xs" variant="outline" onClick={() => toast.info("Scorecard exported", supplier.name)}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    downloadJson(
+                      {
+                        vendor: supplier.name,
+                        code: supplier.code,
+                        contact: supplier.contact,
+                        email: supplier.email,
+                        country: supplier.country,
+                        category: supplier.category,
+                        tier: supplier.tier,
+                        status: supplier.status,
+                        approved: supplier.approved,
+                        rating: supplier.rating,
+                        onTimePct: supplier.onTimePct,
+                        qualityPct: supplier.qualityPct,
+                        riskScore: supplier.riskScore,
+                        leadTimeAvg: supplier.leadTimeAvg,
+                        openPOs: supplier.openPOs,
+                        annualSpend: supplier.annualSpend,
+                        paymentTerms: supplier.paymentTerms,
+                      },
+                      `scorecard-${supplier.name.replace(/\s+/g, "-")}.json`,
+                    );
+                    toast.success("Scorecard exported", supplier.name);
+                  }}
+                >
                   Export scorecard
                 </Button>
               </div>
@@ -626,7 +661,13 @@ function SupplierDrawerBody({ supplier, onClose }: { supplier: Supplier; onClose
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={() => toast.info("Opening document", `${doc.name} — ${supplier.name}`)}
+                    onClick={() => {
+                      downloadText(
+                        `${doc.name}\n${doc.meta}\nVendor: ${supplier.name}\n\n[Generated stand-in for this vendor document.]\n`,
+                        `${doc.name.replace(/\s+/g, "-")}.txt`,
+                      );
+                      toast.success("Document downloaded", `${doc.name} — ${supplier.name}`);
+                    }}
                   >
                     <Download className="size-3.5" /> View
                   </Button>
