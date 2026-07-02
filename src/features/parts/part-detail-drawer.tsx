@@ -4,15 +4,10 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   X,
-  Box,
   Network,
-  History,
   Building2,
-  FileText,
-  ExternalLink,
   Pencil,
   Share2,
-  Layers,
 } from "lucide-react";
 import type { Part } from "@/types";
 import { Thumbnail } from "@/components/shared/thumbnail";
@@ -20,11 +15,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getSupplier, getProduct, whereUsed, db } from "@/mock/db";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { LIFECYCLE_VARIANT, AVAILABILITY_VARIANT } from "@/constants/status";
 
-export function PartDetailDrawer({ part, onClose, onEdit }: { part: Part | null; onClose: () => void; onEdit?: (part: Part) => void }) {
+export function PartDetailDrawer({ part, supplierName, onClose, onEdit }: { part: Part | null; supplierName: (id: string) => string; onClose: () => void; onEdit?: (part: Part) => void }) {
   return (
     <AnimatePresence>
       {part && (
@@ -43,7 +37,7 @@ export function PartDetailDrawer({ part, onClose, onEdit }: { part: Part | null;
             transition={{ type: "spring", stiffness: 360, damping: 36 }}
             className="fixed right-0 top-0 z-[141] flex h-full w-[480px] flex-col border-l border-border bg-surface-overlay shadow-lg"
           >
-            <PartDrawerBody part={part} onClose={onClose} onEdit={onEdit} />
+            <PartDrawerBody part={part} supplierName={supplierName} onClose={onClose} onEdit={onEdit} />
           </motion.aside>
         </>
       )}
@@ -51,11 +45,8 @@ export function PartDetailDrawer({ part, onClose, onEdit }: { part: Part | null;
   );
 }
 
-function PartDrawerBody({ part, onClose, onEdit }: { part: Part; onClose: () => void; onEdit?: (part: Part) => void }) {
-  const supplier = getSupplier(part.supplierId);
-  const usages = whereUsed(part.id);
-  const revs = db().revisions.filter((r) => r.itemId === part.id).slice(0, 6);
-  const docs = db().documents.filter((d) => d.linkedItemId === part.id).slice(0, 6);
+function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; supplierName: (id: string) => string; onClose: () => void; onEdit?: (part: Part) => void }) {
+  const supplier = supplierName(part.supplierId);
 
   return (
     <>
@@ -138,7 +129,7 @@ function PartDrawerBody({ part, onClose, onEdit }: { part: Part; onClose: () => 
                   <Building2 className="size-4" />
                 </div>
                 <div>
-                  <p className="text-[13px] font-medium">{supplier?.name}</p>
+                  <p className="text-[13px] font-medium">{supplier || "—"}</p>
                   <p className="text-2xs text-muted-foreground">MPN {part.manufacturerPartNumber}</p>
                 </div>
               </div>
@@ -168,67 +159,25 @@ function PartDrawerBody({ part, onClose, onEdit }: { part: Part; onClose: () => 
           </TabsContent>
 
           <TabsContent value="usage" className="m-0 p-4">
-            {usages.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">Not used in any project BOM.</p>
+            {/* The where-used detail list has no dedicated API endpoint in the
+                current contract; the material carries an aggregate usage count. */}
+            {part.whereUsedCount > 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Used in {part.whereUsedCount} project BOM{part.whereUsedCount === 1 ? "" : "s"}.
+              </p>
             ) : (
-              <div className="space-y-1.5">
-                <p className="mb-2 text-2xs text-muted-foreground">Used in {usages.length} project BOMs</p>
-                {usages.map((u, i) => {
-                  const p = getProduct(u.projectId);
-                  if (!p) return null;
-                  return (
-                    <div key={i} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-2.5">
-                      <div className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Layers className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium">{p.name}</p>
-                        <p className="font-mono text-2xs text-muted-foreground">{p.code}</p>
-                      </div>
-                      <Badge variant="muted">×{u.qty}</Badge>
-                    </div>
-                  );
-                })}
-              </div>
+              <p className="py-8 text-center text-sm text-muted-foreground">Not used in any project BOM.</p>
             )}
           </TabsContent>
 
           <TabsContent value="revisions" className="m-0 p-4">
-            <div className="relative space-y-0 pl-5">
-              <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
-              {revs.map((r) => (
-                <div key={r.id} className="relative pb-4">
-                  <div className={cn("absolute -left-5 top-1 size-3.5 rounded-full border-2 border-surface", r.status === "Released" ? "bg-success" : "bg-muted-foreground")} />
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] font-semibold">Rev {r.revision}</span>
-                    <Badge variant={r.status === "Released" ? "success" : "muted"}>{r.status}</Badge>
-                  </div>
-                  <p className="mt-0.5 text-[13px] text-muted-foreground">{r.changeSummary}</p>
-                  <p className="mt-0.5 text-2xs text-muted-foreground">{formatDate(r.date)} {r.ecoNumber && `· ${r.ecoNumber}`}</p>
-                </div>
-              ))}
-            </div>
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Current revision <span className="font-mono">{part.revision}</span> · full revision history is not exposed by the API.
+            </p>
           </TabsContent>
 
           <TabsContent value="docs" className="m-0 p-4">
-            {docs.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">No linked documents.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {docs.map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-2.5">
-                    <div className="flex size-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <FileText className="size-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium">{doc.name}</p>
-                      <p className="text-2xs text-muted-foreground">{doc.type} · {doc.format} · v{doc.version}</p>
-                    </div>
-                    <ExternalLink className="size-3.5 text-muted-foreground" />
-                  </div>
-                ))}
-              </div>
-            )}
+            <p className="py-8 text-center text-sm text-muted-foreground">No linked documents.</p>
           </TabsContent>
         </ScrollArea>
       </Tabs>

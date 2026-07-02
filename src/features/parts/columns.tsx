@@ -6,7 +6,6 @@ import type { Part } from "@/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Thumbnail } from "@/components/shared/thumbnail";
-import { getSupplier } from "@/mock/db";
 import { formatCurrency, cn } from "@/lib/utils";
 import { LIFECYCLE_VARIANT, AVAILABILITY_VARIANT } from "@/constants/status";
 
@@ -25,7 +24,13 @@ function SortHeader({ column, label, align = "left" }: { column: any; label: str
   );
 }
 
-export const partColumns: ColumnDef<Part>[] = [
+/**
+ * Column definitions. Supplier names come from a vendor-name map (built from the
+ * API vendors list) rather than the mock `getSupplier` selector, so the grid
+ * resolves vendor names from the same data source as the rest of the screen.
+ */
+export function makePartColumns(supplierName: (id: string) => string): ColumnDef<Part>[] {
+  return [
   {
     id: "select",
     size: 36,
@@ -121,8 +126,8 @@ export const partColumns: ColumnDef<Part>[] = [
     size: 150,
     header: ({ column }) => <SortHeader column={column} label="Supplier" />,
     cell: ({ getValue }) => {
-      const s = getSupplier(getValue<string>());
-      return <span className="truncate text-[13px] text-muted-foreground">{s?.name ?? "—"}</span>;
+      const name = supplierName(getValue<string>());
+      return <span className="truncate text-[13px] text-muted-foreground">{name || "—"}</span>;
     },
   },
   {
@@ -185,4 +190,5 @@ export const partColumns: ColumnDef<Part>[] = [
       </span>
     ),
   },
-];
+  ];
+}

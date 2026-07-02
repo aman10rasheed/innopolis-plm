@@ -10,11 +10,12 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { api } from "./endpoints";
 import type { Query } from "./client";
 import * as m from "./mappers";
-import type { ApiPartInput, ApiUserFull, ApiCreateUserInput } from "./types";
+import type { ApiPartInput, ApiUserFull, ApiCreateUserInput, ApiCategoryInput } from "./types";
 import { useAuthStore } from "@/stores/auth-store";
 
 export const qk = {
   masters: ["masters"] as const,
+  categories: ["categories"] as const,
   parts: (f?: Query) => ["parts", f ?? {}] as const,
   part: (id: string) => ["part", id] as const,
   vendors: (f?: Query) => ["vendors", f ?? {}] as const,
@@ -61,6 +62,38 @@ export const useSubtypes = (categoryId: string | undefined) =>
     enabled: !!categoryId,
     staleTime: 5 * 60_000,
   });
+
+/* ---- Category (Material Type) management — Administrator only for writes ---- */
+export const useCategories = () =>
+  useQuery({ queryKey: qk.categories, queryFn: () => api.masters.categories(), staleTime: 5 * 60_000 });
+
+/** Invalidate both the standalone categories list and the bundled masters query. */
+function invalidateCategories(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: qk.categories });
+  qc.invalidateQueries({ queryKey: qk.masters });
+}
+
+export function useCreateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApiCategoryInput) => api.masters.createCategory(body),
+    onSuccess: () => invalidateCategories(qc),
+  });
+}
+export function useUpdateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<ApiCategoryInput> }) => api.masters.updateCategory(id, body),
+    onSuccess: () => invalidateCategories(qc),
+  });
+}
+export function useDeleteCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.masters.deleteCategory(id),
+    onSuccess: () => invalidateCategories(qc),
+  });
+}
 
 /* ---- Materials ---- */
 export const useParts = (filters?: Query) =>
@@ -298,3 +331,213 @@ export function useSetPassword() {
       useAuthStore.getState().setPassword(currentPassword, newPassword),
   });
 }
+
+/* ============================================================================
+ * Additional hooks — full CRUD coverage for the remaining backend routes.
+ * ==========================================================================*/
+
+/* ---- Material Master: Subtypes / Major Specs / Grades / Units ---- */
+const invalidateMasters = (qc: ReturnType<typeof useQueryClient>) => {
+  qc.invalidateQueries({ queryKey: qk.masters });
+  qc.invalidateQueries({ queryKey: ["subtypes"] });
+  qc.invalidateQueries({ queryKey: ["majorSpecs"] });
+  qc.invalidateQueries({ queryKey: ["grades"] });
+  qc.invalidateQueries({ queryKey: ["units"] });
+};
+
+export const useMajorSpecs = () =>
+  useQuery({ queryKey: ["majorSpecs"], queryFn: () => api.masters.majorSpecs(), staleTime: 5 * 60_000 });
+export const useGrades = () =>
+  useQuery({ queryKey: ["grades"], queryFn: () => api.masters.grades(), staleTime: 5 * 60_000 });
+export const useUnits = () =>
+  useQuery({ queryKey: ["units"], queryFn: () => api.masters.units(), staleTime: 5 * 60_000 });
+
+export function useSaveSubtype() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.masters.updateSubtype(id, body) : api.masters.createSubtype(body),
+    onSuccess: () => invalidateMasters(qc),
+  });
+}
+export function useDeleteSubtype() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.masters.deleteSubtype(id), onSuccess: () => invalidateMasters(qc) });
+}
+export function useSaveMajorSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.masters.updateMajorSpec(id, body) : api.masters.createMajorSpec(body),
+    onSuccess: () => invalidateMasters(qc),
+  });
+}
+export function useDeleteMajorSpec() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.masters.deleteMajorSpec(id), onSuccess: () => invalidateMasters(qc) });
+}
+export function useSaveGrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.masters.updateGrade(id, body) : api.masters.createGrade(body),
+    onSuccess: () => invalidateMasters(qc),
+  });
+}
+export function useDeleteGrade() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.masters.deleteGrade(id), onSuccess: () => invalidateMasters(qc) });
+}
+export function useSaveUnit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.masters.updateUnit(id, body) : api.masters.createUnit(body),
+    onSuccess: () => invalidateMasters(qc),
+  });
+}
+export function useDeleteUnit() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.masters.deleteUnit(id), onSuccess: () => invalidateMasters(qc) });
+}
+
+/* ---- Projects: update + delete ---- */
+export function useSaveProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.projects.update(id, body) : api.projects.create(body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      if (v.id) qc.invalidateQueries({ queryKey: qk.project(v.id) });
+    },
+  });
+}
+export function useDeleteProject() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.projects.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }) });
+}
+
+/* ---- BOMs: update, delete, line update/delete ---- */
+export function useUpdateBom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: { bom_type?: string; revision?: string } }) => api.boms.update(id, body),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: qk.bom(v.id) }); qc.invalidateQueries({ queryKey: ["boms"] }); },
+  });
+}
+export function useDeleteBom() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.boms.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["boms"] }) });
+}
+export function useUpdateBomLine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lineId, body }: { lineId: string; body: Parameters<typeof api.boms.updateLine>[1] }) => api.boms.updateLine(lineId, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bom"] }); qc.invalidateQueries({ queryKey: ["boms"] }); },
+  });
+}
+export function useDeleteBomLine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (lineId: string) => api.boms.deleteLine(lineId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bom"] }); qc.invalidateQueries({ queryKey: ["boms"] }); },
+  });
+}
+
+/* ---- RFQ / Quotations ---- */
+export function useCreateRfq() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => api.rfqs.create(body), onSuccess: () => qc.invalidateQueries({ queryKey: ["rfqs"] }) });
+}
+export function useUpdateRfq() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => api.rfqs.update(id, body),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: qk.rfq(v.id) }); qc.invalidateQueries({ queryKey: ["rfqs"] }); },
+  });
+}
+export function useDeleteRfq() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.rfqs.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["rfqs"] }) });
+}
+export const useRfqQuotations = (rfqId: string) =>
+  useQuery({
+    queryKey: ["rfq", rfqId, "quotations"],
+    queryFn: async () => (await api.rfqs.quotations(rfqId)).map(m.mapQuotation),
+    enabled: !!rfqId,
+  });
+export function useAddQuotation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rfqId, body }: { rfqId: string; body: Record<string, unknown> }) => api.rfqs.addQuotation(rfqId, body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["rfq", v.rfqId] });
+      qc.invalidateQueries({ queryKey: qk.comparison(v.rfqId) });
+      qc.invalidateQueries({ queryKey: ["rfqs"] });
+    },
+  });
+}
+export const useQuotation = (id: string) =>
+  useQuery({ queryKey: ["quotation", id], queryFn: () => api.quotations.get(id), enabled: !!id });
+
+/* ---- Purchase Orders: create + delete ---- */
+export function useCreatePo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.pos.create(body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["pos"] }); qc.invalidateQueries({ queryKey: ["rfqs"] }); },
+  });
+}
+export function useDeletePo() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.pos.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["pos"] }) });
+}
+
+/* ---- Inventory: movements, warehouse CRUD, stock transactions ---- */
+export const useMovements = (filters?: Query) =>
+  useQuery({ queryKey: qk.movements(filters), queryFn: () => api.inventory.movements(filters), placeholderData: keepPreviousData });
+
+function invalidateInventory(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["inventory"] });
+  qc.invalidateQueries({ queryKey: ["movements"] });
+  qc.invalidateQueries({ queryKey: qk.warehouses });
+  qc.invalidateQueries({ queryKey: qk.alerts });
+}
+
+export function useSaveWarehouse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.inventory.updateWarehouse(id, body) : api.inventory.createWarehouse(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.warehouses }),
+  });
+}
+export function useDeleteWarehouse() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.inventory.deleteWarehouse(id), onSuccess: () => qc.invalidateQueries({ queryKey: qk.warehouses }) });
+}
+export function useOpeningStock() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => api.inventory.opening(body), onSuccess: () => invalidateInventory(qc) });
+}
+export function useAdjustStock() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => api.inventory.adjust(body), onSuccess: () => invalidateInventory(qc) });
+}
+export function useTransferStock() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => api.inventory.transfer(body), onSuccess: () => invalidateInventory(qc) });
+}
+
+/* ---- Reports & Analytics ---- */
+export const usePurchaseValueReport = () =>
+  useQuery({ queryKey: ["reports", "purchase-value"], queryFn: () => api.reports.purchaseValue() });
+export const useVendorPerformanceReport = () =>
+  useQuery({ queryKey: ["reports", "vendor-performance"], queryFn: () => api.reports.vendorPerformance() });
+export const useStockValueReport = () =>
+  useQuery({ queryKey: ["reports", "stock-value"], queryFn: () => api.reports.stockValue() });
+export const useVendorSpendReport = () =>
+  useQuery({ queryKey: ["reports", "vendor-spend"], queryFn: () => api.reports.vendorSpend() });
+export const useProjectCostReport = () =>
+  useQuery({ queryKey: ["reports", "project-cost"], queryFn: () => api.reports.projectCost() });

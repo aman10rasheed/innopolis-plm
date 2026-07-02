@@ -5,7 +5,16 @@ import { useRouter } from "next/navigation";
 import { useForm, Controller, type DefaultValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z, type ZodTypeAny } from "zod";
-import { useSaveVendor } from "@/lib/api";
+import {
+  useSaveVendor,
+  useCreateProject,
+  useCreatePo,
+  useCreateBom,
+  useSaveWarehouse,
+  useVendors,
+  useProjects,
+  useParts,
+} from "@/lib/api";
 import {
   Package,
   GitPullRequestArrow,
@@ -43,28 +52,20 @@ import { Section, Field } from "@/components/shared/form-fields";
 import { toast } from "@/components/ui/toast";
 import {
   db,
-  addProduct,
   addEco,
-  addPurchaseOrder,
-  addProjectBom,
-  addSupplier,
   addRevision,
   addDocument,
-  addWarehouse,
 } from "@/mock/db";
 import { PROJECT_FAMILIES, COUNTRIES, MATERIAL_CATEGORIES } from "@/mock/pools";
 import { useUIStore } from "@/stores/ui-store";
 import { BOM_STAGES } from "@/types";
 import type {
-  Product,
   Eco,
-  PurchaseOrder,
   Lifecycle,
   EcoType,
   EcoPriority,
   PoStatus,
   ProjectBom,
-  Supplier,
   Revision,
   DocItem,
   DocType,
@@ -93,7 +94,6 @@ const rnd = (n: number) => Math.floor(Math.random() * n);
 const todayISO = () => new Date().toISOString();
 const dateInput = (offsetDays = 0) =>
   new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
-const hueFrom = (s: string) => s.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 
 /* -------------------------------------------------------------------------- */
 /* Shared shell                                                               */
@@ -225,6 +225,7 @@ const productSchema = z.object({
 });
 
 export function CreateProductDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const createProject = useCreateProject();
   return (
     <CreateShell
       open={open}
@@ -249,36 +250,14 @@ export function CreateProductDialog({ open, onOpenChange }: { open: boolean; onO
         msrp: 1800000,
         description: "",
       }}
-      buildAndPersist={(v) => {
-        const fam = PROJECT_FAMILIES.find((f: { family: string }) => f.family === v.family);
-        const margin = v.msrp > 0 ? ((v.msrp - v.unitCost) / v.msrp) * 100 : 0;
-        const p: Product = {
-          id: `PR-new-${Date.now()}`,
-          code: v.code,
-          projectNumber: v.code,
+      buildAndPersist={async (v) => {
+        await createProject.mutateAsync({
           name: v.name,
-          family: v.family,
           customer: v.customer,
-          engineerId: db().users[0]!.id,
-          stage: "Enquiry",
-          category: fam?.category ?? "Bioprocess",
-          description: v.description || `New ${v.family} project package.`,
-          lifecycle: v.lifecycle as Lifecycle,
-          revision: v.revision,
-          version: v.version,
-          unitCost: v.unitCost,
-          targetCost: v.targetCost,
-          msrp: v.msrp,
-          marginPct: Math.round(margin * 10) / 10,
-          unitsBuilt: 0,
-          openEcos: 0,
-          releaseDate: todayISO(),
-          ownerId: db().users[0]!.id,
-          thumbnailHue: hueFrom(v.name),
-          health: 90,
-        };
-        addProduct(p);
-        return `${p.code} · ${p.name}`;
+          family: v.family,
+          target_cost: v.targetCost,
+        });
+        return `${v.code} · ${v.name}`;
       }}
     >
       {({ register, control, setValue, formState: { errors } }) => (
@@ -352,6 +331,7 @@ const ecoSchema = z.object({
   description: z.string().optional(),
 });
 
+// no backend endpoint — mock retained
 export function CreateEcoDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const products = React.useMemo(() => db().products, []);
   return (
@@ -450,7 +430,9 @@ const poSchema = z.object({
 });
 
 export function CreatePoDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const suppliers = React.useMemo(() => db().suppliers, []);
+  const createPo = useCreatePo();
+  const suppliers = useVendors().data?.items ?? [];
+  const parts = useParts().data?.items ?? [];
   return (
     <CreateShell
       open={open}
@@ -470,25 +452,18 @@ export function CreatePoDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         priority: "Medium",
         status: "Draft",
       }}
-      buildAndPersist={(v) => {
-        const supplier = db().suppliers.find((s) => s.id === v.supplierId)!;
-        const po: PurchaseOrder = {
-          id: `PO-new-${Date.now()}`,
-          number: `PO-${90000 + rnd(9999)}`,
-          supplierId: v.supplierId,
-          supplierName: supplier.name,
-          status: v.status as PoStatus,
-          lineItems: v.lineItems,
-          totalValue: v.totalValue,
-          orderedDate: todayISO(),
-          expectedDate: new Date(v.expectedDate).toISOString(),
-          receivedPct: 0,
-          ownerId: db().users[0]!.id,
-          priority: v.priority as EcoPriority,
-          onTimeRisk: "Low",
-        };
-        addPurchaseOrder(po);
-        return `${po.number} · ${supplier.name}`;
+      buildAndPersist={async (v) => {
+        const supplier = suppliers.find((s) => s.id === v.supplierId);
+        const partId = parts[0]?.id;
+        const unitPrice = v.lineItems > 0 ? v.totalValue / v.lineItems : v.totalValue;
+        await createPo.mutateAsync({
+          supplier_id: v.supplierId,
+          priority: v.priority,
+          lines: partId
+            ? [{ part_id: partId, quantity: v.lineItems, unit_price: unitPrice }]
+            : [],
+        });
+        return `${supplier?.name ?? v.supplierId}`;
       }}
     >
       {({ register, control, formState: { errors } }) => (
@@ -532,7 +507,8 @@ const bomSchema = z.object({
 });
 
 export function CreateBomDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const products = React.useMemo(() => db().products, []);
+  const createBom = useCreateBom();
+  const products = useProjects().data?.items ?? [];
   return (
     <CreateShell
       open={open}
@@ -545,31 +521,13 @@ export function CreateBomDialog({ open, onOpenChange }: { open: boolean; onOpenC
       successLine="BOM drafted"
       schema={bomSchema}
       defaultValues={{ projectId: "", bomType: "Engineering", revision: "A", lineItems: 40 }}
-      buildAndPersist={(v) => {
-        const product = db().products.find((p) => p.id === v.projectId)!;
-        const me = db().users[0]!;
-        const b: ProjectBom = {
-          id: `PB-new-${Date.now()}`,
-          number: `BOM-${7000 + rnd(999)}`,
-          projectId: product.id,
-          projectNumber: product.projectNumber,
-          projectName: product.name,
-          customer: product.customer,
-          revision: v.revision,
-          stage: "Draft",
-          bomType: v.bomType as ProjectBom["bomType"],
-          lineItems: v.lineItems,
-          uniqueMaterials: Math.round(v.lineItems * 0.7),
-          totalValue: product.unitCost,
-          criticalItems: 0,
-          longLeadItems: 0,
-          ownerId: me.id,
-          createdAt: todayISO(),
-          updatedAt: todayISO(),
-          audit: [{ stage: "Draft", userId: me.id, date: todayISO(), comment: "Draft prepared from project." }],
-        };
-        addProjectBom(b);
-        return `${b.number} · ${product.name}`;
+      buildAndPersist={async (v) => {
+        const product = products.find((p) => p.id === v.projectId);
+        await createBom.mutateAsync({
+          project_id: v.projectId,
+          bom_type: v.bomType,
+        });
+        return `${product?.name ?? v.projectId}`;
       }}
     >
       {({ register, control, formState: { errors } }) => (
@@ -688,6 +646,7 @@ const revisionSchema = z.object({
   changeSummary: z.string().min(3, "Describe the change"),
 });
 
+// no backend endpoint — mock retained
 export function CreateRevisionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const items = React.useMemo(() => db().parts.slice(0, 200), []);
   return (
@@ -763,6 +722,7 @@ const documentSchema = z.object({
   status: z.string().min(1),
 });
 
+// no backend endpoint — mock retained
 export function CreateDocumentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const folders = React.useMemo(
     () => Array.from(new Set(db().documents.map((d) => d.folder))),
@@ -837,6 +797,7 @@ const workOrderSchema = z.object({
   dueDate: z.string().min(1),
 });
 
+// no backend endpoint — mock retained
 export function CreateWorkOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const products = React.useMemo(() => db().products, []);
   return (
@@ -892,6 +853,7 @@ const reportSchema = z.object({
   schedule: z.string().min(1),
 });
 
+// no backend endpoint — mock retained
 export function CreateReportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   return (
     <CreateShell
@@ -936,6 +898,7 @@ const countSchema = z.object({
   scheduledDate: z.string().min(1),
 });
 
+// no backend endpoint — mock retained
 export function CreateCountDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const warehouses = React.useMemo(() => db().warehouses, []);
   return (
@@ -989,6 +952,7 @@ const warehouseSchema = z.object({
 });
 
 export function CreateWarehouseDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const saveWarehouse = useSaveWarehouse();
   return (
     <CreateShell
       open={open}
@@ -1001,23 +965,18 @@ export function CreateWarehouseDialog({ open, onOpenChange }: { open: boolean; o
       successLine="Warehouse added"
       schema={warehouseSchema}
       defaultValues={{ name: "", code: `WH-${100 + rnd(899)}`, city: "", country: "India", type: "Distribution", capacityPct: 50 }}
-      buildAndPersist={(v) => {
-        const w: Warehouse = {
-          id: `WH-new-${Date.now()}`,
-          code: v.code,
-          name: v.name,
-          city: v.city,
-          country: v.country,
-          type: v.type as Warehouse["type"],
-          capacityPct: v.capacityPct,
-          skuCount: 0,
-          stockValue: 0,
-          lowStockItems: 0,
-          lat: 0,
-          lng: 0,
-        };
-        addWarehouse(w);
-        return `${w.code} · ${w.name}`;
+      buildAndPersist={async (v) => {
+        await saveWarehouse.mutateAsync({
+          body: {
+            code: v.code,
+            name: v.name,
+            type: v.type,
+            city: v.city,
+            country: v.country,
+            capacity_pct: v.capacityPct,
+          },
+        });
+        return `${v.code} · ${v.name}`;
       }}
     >
       {({ register, control, formState: { errors } }) => (

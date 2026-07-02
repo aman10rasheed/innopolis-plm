@@ -31,6 +31,17 @@ import {
   LineTrend,
   MultiBar,
 } from "@/components/shared/charts";
+import { QueryBoundary } from "@/components/shared/query-boundary";
+import {
+  useProjects,
+  useVendors,
+  useParts,
+  useInventory,
+  useStockAlerts,
+  useWarehouses,
+} from "@/lib/api";
+import type { Product } from "@/types";
+// no backend endpoint — rolled cost + decorative chart series stay on the mock db
 import { db, totalRolledCost } from "@/mock/db";
 import {
   costTrendSeries,
@@ -393,19 +404,40 @@ function DocTable({
 
 /* ------------------------------------------------------------------ */
 function ReportBody({ report }: { report: ReportTemplate }) {
+  // no backend endpoint — ecos + decorative chart series stay on the mock db
   const d = db();
 
-  // COST family
+  // API-backed sources (called unconditionally; branches consume what they need)
+  const projectsQuery = useProjects();
+  const vendorsQuery = useVendors();
+  const partsQuery = useParts();
+  const inventoryQuery = useInventory();
+  const alertsQuery = useStockAlerts();
+  const warehousesQuery = useWarehouses();
+
+  const projects = projectsQuery.data?.items ?? [];
+  const suppliers = vendorsQuery.data?.items ?? [];
+  const parts = partsQuery.data?.items ?? [];
+  const inventory = inventoryQuery.data?.items ?? [];
+  const alerts = alertsQuery.data ?? [];
+  const warehouses = warehousesQuery.data ?? [];
+
+  // COST family — projects drive KPIs/family table (API); rolled cost + trend stay mock
   if (report.type === "Cost") {
-    const costTrend = costTrendSeries();
-    const rolled = totalRolledCost();
-    const families = familyAgg(d);
+    const costTrend = costTrendSeries(); // no backend endpoint — mock retained
+    const rolled = totalRolledCost(); // no backend endpoint — mock retained
+    const families = familyAgg(projects);
     return (
-      <>
+      <QueryBoundary
+        isLoading={projectsQuery.isLoading}
+        isError={projectsQuery.isError}
+        error={projectsQuery.error}
+        onRetry={() => projectsQuery.refetch()}
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <KpiTile label="Rolled Cost" value={formatCompactCurrency(rolled)} sub="all project BOMs" />
-          <KpiTile label="Avg Unit" value={formatCurrency(avg(d.products.map((p) => p.unitCost)), { maximumFractionDigits: 0 })} />
-          <KpiTile label="Avg Margin" value={`${avg(d.products.map((p) => p.marginPct)).toFixed(1)}%`} />
+          <KpiTile label="Avg Unit" value={formatCurrency(avg(projects.map((p) => p.unitCost)), { maximumFractionDigits: 0 })} />
+          <KpiTile label="Avg Margin" value={`${avg(projects.map((p) => p.marginPct)).toFixed(1)}%`} />
           <KpiTile label="YoY" value="-6.8%" sub="vs prior year" />
         </div>
         <div>
@@ -427,21 +459,26 @@ function ReportBody({ report }: { report: ReportTemplate }) {
             ])}
           />
         </div>
-      </>
+      </QueryBoundary>
     );
   }
 
-  // SUPPLIER
+  // SUPPLIER — API-backed vendors; perf trend stays mock
   if (report.type === "Supplier") {
-    const perf = supplierPerfSeries();
-    const top = [...d.suppliers].sort((a, b) => b.rating - a.rating).slice(0, 6);
+    const perf = supplierPerfSeries(); // no backend endpoint — mock retained
+    const top = [...suppliers].sort((a, b) => b.rating - a.rating).slice(0, 6);
     return (
-      <>
+      <QueryBoundary
+        isLoading={vendorsQuery.isLoading}
+        isError={vendorsQuery.isError}
+        error={vendorsQuery.error}
+        onRetry={() => vendorsQuery.refetch()}
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <KpiTile label="Suppliers" value={formatNumber(d.suppliers.length)} />
-          <KpiTile label="Avg On-time" value={`${Math.round(avg(d.suppliers.map((s) => s.onTimePct)))}%`} />
-          <KpiTile label="Avg Quality" value={`${Math.round(avg(d.suppliers.map((s) => s.qualityPct)))}%`} />
-          <KpiTile label="Annual Spend" value={formatCompactCurrency(d.suppliers.reduce((s, x) => s + x.annualSpend, 0))} />
+          <KpiTile label="Suppliers" value={formatNumber(suppliers.length)} />
+          <KpiTile label="Avg On-time" value={`${Math.round(avg(suppliers.map((s) => s.onTimePct)))}%`} />
+          <KpiTile label="Avg Quality" value={`${Math.round(avg(suppliers.map((s) => s.qualityPct)))}%`} />
+          <KpiTile label="Annual Spend" value={formatCompactCurrency(suppliers.reduce((s, x) => s + x.annualSpend, 0))} />
         </div>
         <div>
           <ReportTitle>Performance Trend</ReportTitle>
@@ -467,21 +504,29 @@ function ReportBody({ report }: { report: ReportTemplate }) {
             ])}
           />
         </div>
-      </>
+      </QueryBoundary>
     );
   }
 
-  // INVENTORY
+  // INVENTORY — API-backed inventory balances, stock alerts & warehouses
   if (report.type === "Inventory") {
-    const shortages = d.inventory.filter((i) => i.status !== "In Stock");
-    const byWarehouse = d.warehouses.map((w) => ({ label: w.code, value: w.skuCount }));
+    const byWarehouse = warehouses.map((w) => ({ label: w.code, value: w.skuCount }));
     return (
-      <>
+      <QueryBoundary
+        isLoading={inventoryQuery.isLoading || alertsQuery.isLoading || warehousesQuery.isLoading}
+        isError={inventoryQuery.isError || alertsQuery.isError || warehousesQuery.isError}
+        error={inventoryQuery.error ?? alertsQuery.error ?? warehousesQuery.error}
+        onRetry={() => {
+          inventoryQuery.refetch();
+          alertsQuery.refetch();
+          warehousesQuery.refetch();
+        }}
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <KpiTile label="SKUs" value={formatNumber(d.inventory.length)} />
-          <KpiTile label="Shortages" value={formatNumber(shortages.length)} sub="below reorder" />
-          <KpiTile label="Stock Value" value={formatCompactCurrency(d.warehouses.reduce((s, w) => s + w.stockValue, 0))} />
-          <KpiTile label="Warehouses" value={formatNumber(d.warehouses.length)} />
+          <KpiTile label="SKUs" value={formatNumber(inventory.length)} />
+          <KpiTile label="Shortages" value={formatNumber(alerts.length)} sub="below reorder" />
+          <KpiTile label="Stock Value" value={formatCompactCurrency(warehouses.reduce((s, w) => s + w.stockValue, 0))} />
+          <KpiTile label="Warehouses" value={formatNumber(warehouses.length)} />
         </div>
         <div>
           <ReportTitle>SKU Coverage by Warehouse</ReportTitle>
@@ -491,7 +536,7 @@ function ReportBody({ report }: { report: ReportTemplate }) {
           <ReportTitle>At-risk Items</ReportTitle>
           <DocTable
             headers={["Part", "Warehouse", "Available", "Reorder", "Status"]}
-            rows={shortages.slice(0, 8).map((i) => [
+            rows={alerts.slice(0, 8).map((i) => [
               i.partName,
               i.warehouseCode,
               formatNumber(i.available),
@@ -500,11 +545,11 @@ function ReportBody({ report }: { report: ReportTemplate }) {
             ])}
           />
         </div>
-      </>
+      </QueryBoundary>
     );
   }
 
-  // QUALITY
+  // QUALITY — no backend endpoint (yield/scrap/build attainment are mock)
   if (report.type === "Quality") {
     const mfg = manufacturingProgress();
     const yieldTrend = monthlySeries(101, 95, 0.2, 3).map((m) => ({ label: m.label, value: Math.min(100, m.value) }));
@@ -535,23 +580,31 @@ function ReportBody({ report }: { report: ReportTemplate }) {
     );
   }
 
-  // COMPLIANCE
+  // COMPLIANCE — API-backed parts + projects
   if (report.type === "Compliance") {
-    const asme = d.parts.filter((p) => p.compliance.includes("ASME")).length;
-    const gmp = d.parts.filter((p) => p.compliance.includes("GMP")).length;
+    const asme = parts.filter((p) => p.compliance.includes("ASME")).length;
+    const gmp = parts.filter((p) => p.compliance.includes("GMP")).length;
     const coverage = [
       { name: "ASME covered", value: asme, color: "hsl(var(--success))" },
       { name: "GMP covered", value: gmp, color: "hsl(var(--info))" },
-      { name: "Uncovered", value: Math.max(0, d.parts.length - Math.max(asme, gmp)), color: "hsl(var(--destructive))" },
+      { name: "Uncovered", value: Math.max(0, parts.length - Math.max(asme, gmp)), color: "hsl(var(--destructive))" },
     ];
-    const families = familyAgg(d).slice(0, 6);
+    const families = familyAgg(projects).slice(0, 6);
     return (
-      <>
+      <QueryBoundary
+        isLoading={partsQuery.isLoading || projectsQuery.isLoading}
+        isError={partsQuery.isError || projectsQuery.isError}
+        error={partsQuery.error ?? projectsQuery.error}
+        onRetry={() => {
+          partsQuery.refetch();
+          projectsQuery.refetch();
+        }}
+      >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <KpiTile label="Total Materials" value={formatNumber(d.parts.length)} />
+          <KpiTile label="Total Materials" value={formatNumber(parts.length)} />
           <KpiTile label="ASME" value={formatNumber(asme)} sub="certified" />
           <KpiTile label="GMP" value={formatNumber(gmp)} sub="contact parts" />
-          <KpiTile label="Coverage" value={`${Math.round((asme / Math.max(1, d.parts.length)) * 100)}%`} />
+          <KpiTile label="Coverage" value={`${Math.round((asme / Math.max(1, parts.length)) * 100)}%`} />
         </div>
         <div>
           <ReportTitle>Declaration Coverage</ReportTitle>
@@ -569,11 +622,11 @@ function ReportBody({ report }: { report: ReportTemplate }) {
             ])}
           />
         </div>
-      </>
+      </QueryBoundary>
     );
   }
 
-  // ENGINEERING (default — ECO summary, NPI, obsolescence, revision activity)
+  // ENGINEERING (default) — no backend endpoint (ecos/revisions are mock)
   const ecoStatusMix = (() => {
     const map = new Map<string, number>();
     for (const e of d.ecos) map.set(e.status, (map.get(e.status) ?? 0) + 1);
@@ -629,12 +682,12 @@ function avg(arr: number[]) {
   return arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
 }
 
-function familyAgg(d: ReturnType<typeof db>) {
+function familyAgg(products: Product[]) {
   const map = new Map<
     string,
     { unit: number; target: number; margin: number; revenue: number; count: number }
   >();
-  for (const p of d.products) {
+  for (const p of products) {
     const cur = map.get(p.family) ?? { unit: 0, target: 0, margin: 0, revenue: 0, count: 0 };
     cur.unit += p.unitCost;
     cur.target += p.targetCost;

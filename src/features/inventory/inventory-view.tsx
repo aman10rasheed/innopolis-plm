@@ -16,7 +16,8 @@ import {
   MapPin,
   Plus,
 } from "lucide-react";
-import { db } from "@/mock/db";
+import { useInventory, useWarehouses, useStockAlerts } from "@/lib/api";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 import type { InventoryRecord, Warehouse, Availability } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -54,8 +55,12 @@ const STATUS_FILTERS: ("all" | Availability)[] = [
 ];
 
 export function InventoryView() {
-  const warehouses = db().warehouses;
-  const inventory = db().inventory;
+  const inventoryQuery = useInventory();
+  const warehousesQuery = useWarehouses();
+  const alertsQuery = useStockAlerts();
+
+  const inventory = inventoryQuery.data?.items ?? [];
+  const warehouses = warehousesQuery.data ?? [];
 
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<"all" | Availability>("all");
@@ -89,11 +94,8 @@ export function InventoryView() {
   }, []);
 
   const alerts = React.useMemo(
-    () =>
-      inventory
-        .filter((r) => r.status !== "In Stock")
-        .sort((a, b) => a.available - b.available),
-    [inventory],
+    () => [...(alertsQuery.data ?? [])].sort((a, b) => a.available - b.available),
+    [alertsQuery.data],
   );
 
   const filtered = React.useMemo(
@@ -111,6 +113,16 @@ export function InventoryView() {
 
   return (
     <ScrollArea className="h-full">
+      <QueryBoundary
+        isLoading={inventoryQuery.isLoading || warehousesQuery.isLoading}
+        isError={inventoryQuery.isError || warehousesQuery.isError}
+        error={inventoryQuery.error ?? warehousesQuery.error}
+        onRetry={() => {
+          inventoryQuery.refetch();
+          warehousesQuery.refetch();
+          alertsQuery.refetch();
+        }}
+      >
       <div className="space-y-4 p-4">
         {/* Warehouses */}
         <section>
@@ -265,7 +277,7 @@ export function InventoryView() {
             </h2>
             {activeWh && (
               <Badge variant="info">
-                {db().warehouses.find((w) => w.id === activeWh)?.code}
+                {warehouses.find((w) => w.id === activeWh)?.code}
               </Badge>
             )}
             <div className="relative ml-auto w-56">
@@ -345,9 +357,11 @@ export function InventoryView() {
           </div>
         </section>
       </div>
+      </QueryBoundary>
 
       <WarehouseDetailDrawer
         warehouse={detailWh}
+        records={detailWh ? inventory.filter((r) => r.warehouseId === detailWh.id) : []}
         onClose={() => setDetailWh(null)}
         onFilter={(id) => {
           setActiveWh(id);
@@ -360,17 +374,15 @@ export function InventoryView() {
 
 function WarehouseDetailDrawer({
   warehouse,
+  records,
   onClose,
   onFilter,
 }: {
   warehouse: Warehouse | null;
+  records: InventoryRecord[];
   onClose: () => void;
   onFilter: (id: string) => void;
 }) {
-  const records = React.useMemo(
-    () => (warehouse ? db().inventory.filter((r) => r.warehouseId === warehouse.id) : []),
-    [warehouse],
-  );
   const lowStock = records.filter((r) => r.status !== "In Stock").length;
   const stockValue = records.reduce((s, r) => s + r.onHand * r.unitCost, 0);
   const incoming = records.reduce((s, r) => s + r.incoming, 0);

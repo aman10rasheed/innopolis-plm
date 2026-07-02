@@ -35,7 +35,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { Thumbnail } from "@/components/shared/thumbnail";
 import { AreaTrend, MultiBar } from "@/components/shared/charts";
-import { db, getUser, getProduct } from "@/mock/db";
+import { QueryBoundary } from "@/components/shared/query-boundary";
+import { useDashboard, useProjects, useStockAlerts, toNumber } from "@/lib/api";
+// no backend endpoint — ecos/approvals still come from the mock db
+import { db, getUser } from "@/mock/db";
 import { costTrendSeries, manufacturingProgress } from "@/mock/series";
 import {
   formatCompactCurrency,
@@ -90,32 +93,50 @@ export default function DashboardPage() {
   const firstName = user?.name.split(" ")[0] ?? "there";
   const roleMeta = user ? ROLE_META[user.role] : null;
 
-  const metrics = React.useMemo(() => {
+  // API-backed data (KPIs, projects, stock alerts)
+  const dashboardQuery = useDashboard();
+  const projectsQuery = useProjects();
+  const alertsQuery = useStockAlerts();
+  const dashboard = dashboardQuery.data;
+  const projectMap = React.useMemo(
+    () => new Map((projectsQuery.data?.items ?? []).map((p) => [p.id, p])),
+    [projectsQuery.data],
+  );
+  const stockAlerts = alertsQuery.data ?? [];
+
+  // API KPIs
+  const kpis = {
+    products: dashboard?.projects ?? 0,
+    inventoryValue: toNumber(dashboard?.stockValue),
+    shortages: dashboard?.lowStockItems ?? 0,
+  };
+
+  // no backend endpoint — ecos/approvals metrics still from the mock db
+  const mockMetrics = React.useMemo(() => {
     const openEcos = d.ecos.filter((e) => e.status !== "Completed");
     const pending = d.approvals.filter((a) => a.status === "Pending");
-    const shortages = d.inventory.filter((i) => i.status !== "In Stock");
-    const inventoryValue = d.warehouses.reduce((s, w) => s + w.stockValue, 0);
-    return {
-      products: d.products.filter((p) => p.lifecycle === "Production").length,
-      openEcos: openEcos.length,
-      pending: pending.length,
-      inventoryValue,
-      shortages: shortages.length,
-    };
+    return { openEcos: openEcos.length, pending: pending.length };
   }, [d]);
 
   const costTrend = React.useMemo(costTrendSeries, []);
   const mfg = React.useMemo(manufacturingProgress, []);
 
+  // no backend endpoint — mock retained
   const openEcos = d.ecos
     .filter((e) => e.status === "Review" || e.status === "Approved")
     .slice(0, 5);
+  // no backend endpoint — mock retained
   const approvals = d.approvals.filter((a) => a.status === "Pending").slice(0, 4);
-  const shortages = d.inventory
-    .filter((i) => i.status !== "In Stock")
+  // API-backed: stock alerts (low stock / out of stock)
+  const shortages = [...stockAlerts]
     .sort((a, b) => a.available - b.available)
     .slice(0, 5);
-  const pinned = pinnedProjects.map((id) => getProduct(id)).filter(Boolean).slice(0, 3);
+  // API-backed: pinned projects resolved against the projects list
+  const pinned = pinnedProjects
+    .map((id) => projectMap.get(id))
+    .filter((p): p is NonNullable<typeof p> => Boolean(p))
+    .slice(0, 3);
+  // no backend endpoint — mock retained
   const deadlines = d.ecos
     .filter((e) => e.status !== "Completed")
     .sort((a, b) => +new Date(a.dueDate) - +new Date(b.dueDate))
@@ -175,44 +196,52 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {/* KPI row */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <StatCard
-              label="Active Projects"
-              value={metrics.products}
-              delta={4.2}
-              icon={Package}
-              accent="primary"
-              spark={[12, 14, 13, 16, 18, 17, 19, 21]}
-            />
-            <StatCard
-              label="Open Engineering Changes"
-              value={metrics.openEcos}
-              delta={-8.1}
-              deltaSuffix="vs last week"
-              icon={GitPullRequestArrow}
-              accent="info"
-              invertDelta
-              spark={[40, 38, 42, 39, 35, 33, 31, 28]}
-            />
-            <StatCard
-              label="Pending Approvals"
-              value={metrics.pending}
-              delta={12.5}
-              icon={CheckCircle2}
-              accent="warning"
-              invertDelta
-              spark={[8, 9, 11, 10, 13, 12, 14, 15]}
-            />
-            <StatCard
-              label="Inventory Value"
-              value={formatCompactCurrency(metrics.inventoryValue)}
-              delta={2.8}
-              icon={CircleDollarSign}
-              accent="success"
-              spark={[60, 62, 61, 64, 66, 65, 68, 70]}
-            />
-          </div>
+          {/* KPI row — Active Projects + Inventory Value from the API; ECO/approval
+              tiles have no backend endpoint and stay on the mock db. */}
+          <QueryBoundary
+            isLoading={dashboardQuery.isLoading}
+            isError={dashboardQuery.isError}
+            error={dashboardQuery.error}
+            onRetry={() => dashboardQuery.refetch()}
+          >
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <StatCard
+                label="Active Projects"
+                value={kpis.products}
+                delta={4.2}
+                icon={Package}
+                accent="primary"
+                spark={[12, 14, 13, 16, 18, 17, 19, 21]}
+              />
+              <StatCard
+                label="Open Engineering Changes"
+                value={mockMetrics.openEcos}
+                delta={-8.1}
+                deltaSuffix="vs last week"
+                icon={GitPullRequestArrow}
+                accent="info"
+                invertDelta
+                spark={[40, 38, 42, 39, 35, 33, 31, 28]}
+              />
+              <StatCard
+                label="Pending Approvals"
+                value={mockMetrics.pending}
+                delta={12.5}
+                icon={CheckCircle2}
+                accent="warning"
+                invertDelta
+                spark={[8, 9, 11, 10, 13, 12, 14, 15]}
+              />
+              <StatCard
+                label="Inventory Value"
+                value={formatCompactCurrency(kpis.inventoryValue)}
+                delta={2.8}
+                icon={CircleDollarSign}
+                accent="success"
+                spark={[60, 62, 61, 64, 66, 65, 68, 70]}
+              />
+            </div>
+          </QueryBoundary>
 
           {/* Charts row */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -337,38 +366,47 @@ export default function DashboardPage() {
               <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle className="flex items-center gap-2 text-[15px]">
                   Inventory Shortages
-                  <Badge variant="destructive">{metrics.shortages}</Badge>
+                  <Badge variant="destructive">{kpis.shortages}</Badge>
                 </CardTitle>
                 <Link href="/inventory" className="text-xs font-medium text-primary hover:underline">
                   Manage
                 </Link>
               </CardHeader>
               <CardContent className="space-y-1 pt-0">
-                {shortages.map((i) => (
-                  <div
-                    key={i.id}
-                    className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-accent/50"
-                  >
+                {/* API-backed: /inventory/alerts */}
+                <QueryBoundary
+                  isLoading={alertsQuery.isLoading}
+                  isError={alertsQuery.isError}
+                  error={alertsQuery.error}
+                  onRetry={() => alertsQuery.refetch()}
+                  className="py-6"
+                >
+                  {shortages.map((i) => (
                     <div
-                      className={cn(
-                        "flex size-8 shrink-0 items-center justify-center rounded-lg",
-                        i.available <= 0 ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
-                      )}
+                      key={i.id}
+                      className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-accent/50"
                     >
-                      <AlertTriangle className="size-4" />
+                      <div
+                        className={cn(
+                          "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                          i.available <= 0 ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
+                        )}
+                      >
+                        <AlertTriangle className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium">{i.partName}</p>
+                        <p className="text-2xs text-muted-foreground">
+                          {i.partNumber} · {i.warehouseCode}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[13px] font-semibold tabular">{i.available}</p>
+                        <p className="text-2xs text-muted-foreground">avail.</p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium">{i.partName}</p>
-                      <p className="text-2xs text-muted-foreground">
-                        {i.partNumber} · {i.warehouseCode}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[13px] font-semibold tabular">{i.available}</p>
-                      <p className="text-2xs text-muted-foreground">avail.</p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </QueryBoundary>
               </CardContent>
             </Card>
           </div>
@@ -385,32 +423,51 @@ export default function DashboardPage() {
                 </Link>
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-3 pt-0 sm:grid-cols-3">
-                {pinned.map((p) => (
-                  <Link
-                    key={p!.id}
-                    href="/products"
-                    className="group rounded-xl border border-border bg-surface p-3 transition-all hover:border-border-strong hover:shadow-sm"
+                {/* API-backed: pinned ids resolved against /projects */}
+                <div className="sm:col-span-3">
+                  <QueryBoundary
+                    isLoading={projectsQuery.isLoading}
+                    isError={projectsQuery.isError}
+                    error={projectsQuery.error}
+                    onRetry={() => projectsQuery.refetch()}
+                    className="py-6"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Thumbnail hue={p!.thumbnailHue} size={36} icon={Package} />
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-semibold">{p!.family}</p>
-                        <p className="font-mono text-2xs text-muted-foreground">{p!.code}</p>
+                    {pinned.length === 0 ? (
+                      <p className="py-4 text-center text-[13px] text-muted-foreground">
+                        No pinned projects yet.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        {pinned.map((p) => (
+                          <Link
+                            key={p.id}
+                            href="/products"
+                            className="group rounded-xl border border-border bg-surface p-3 transition-all hover:border-border-strong hover:shadow-sm"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <Thumbnail hue={p.thumbnailHue} size={36} icon={Package} />
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-semibold">{p.family}</p>
+                                <p className="font-mono text-2xs text-muted-foreground">{p.code}</p>
+                              </div>
+                            </div>
+                            <div className="mt-3 space-y-1.5">
+                              <div className="flex justify-between text-2xs">
+                                <span className="text-muted-foreground">Health</span>
+                                <span className="font-medium tabular">{p.health}%</span>
+                              </div>
+                              <Progress value={p.health} className="h-1.5" />
+                            </div>
+                            <div className="mt-2.5 flex items-center justify-between">
+                              <Badge variant={LIFECYCLE_VARIANT[p.lifecycle]}>{p.lifecycle}</Badge>
+                              <span className="text-2xs text-muted-foreground">{p.openEcos} open ECOs</span>
+                            </div>
+                          </Link>
+                        ))}
                       </div>
-                    </div>
-                    <div className="mt-3 space-y-1.5">
-                      <div className="flex justify-between text-2xs">
-                        <span className="text-muted-foreground">Health</span>
-                        <span className="font-medium tabular">{p!.health}%</span>
-                      </div>
-                      <Progress value={p!.health} className="h-1.5" />
-                    </div>
-                    <div className="mt-2.5 flex items-center justify-between">
-                      <Badge variant={LIFECYCLE_VARIANT[p!.lifecycle]}>{p!.lifecycle}</Badge>
-                      <span className="text-2xs text-muted-foreground">{p!.openEcos} open ECOs</span>
-                    </div>
-                  </Link>
-                ))}
+                    )}
+                  </QueryBoundary>
+                </div>
               </CardContent>
             </Card>
 

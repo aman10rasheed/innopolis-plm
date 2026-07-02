@@ -1,22 +1,31 @@
 "use client";
 
-import { Library, Plus, Upload } from "lucide-react";
+import * as React from "react";
+import { Library, Plus, Upload, Layers } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { PartsTable } from "@/features/parts/parts-table";
-import { db } from "@/mock/db";
+import { CategoryManagerDialog } from "@/features/parts/category-manager-dialog";
 import { toast } from "@/components/ui/toast";
 import { useUIStore } from "@/stores/ui-store";
+import { useAuthStore } from "@/stores/auth-store";
 import { pickTextFile, parseCsv } from "@/lib/export";
 import { importPartsFromCsv } from "@/features/parts/import-parts";
+import { useParts, useMaterialMasters } from "@/lib/api";
 
 export default function PartsPage() {
-  const dataRev = useUIStore((s) => s.dataRev);
   const setCreatePartOpen = useUIStore((s) => s.setCreatePartOpen);
   const bumpDataRev = useUIStore((s) => s.bumpDataRev);
-  // dataRev is read so the header counts refresh after an import.
-  void dataRev;
-  const total = db().parts.length;
+  const isAdmin = useAuthStore((s) => s.user?.role === "Administrator");
+  const [categoriesOpen, setCategoriesOpen] = React.useState(false);
+
+  // Header counts come from the same API the grid consumes.
+  const partsQuery = useParts();
+  const mastersQuery = useMaterialMasters();
+  const total = partsQuery.data?.meta.total ?? partsQuery.data?.items.length ?? 0;
+  const categoryCount =
+    mastersQuery.data?.categories.length ??
+    new Set((partsQuery.data?.items ?? []).map((p) => p.category)).size;
 
   const handleImport = async () => {
     const file = await pickTextFile();
@@ -38,10 +47,15 @@ export default function PartsPage() {
     <div className="relative flex h-full flex-col">
       <PageHeader
         title="Material Master"
-        description={`${total.toLocaleString()} materials · ${new Set(db().parts.map((p) => p.category)).size} categories · single source of truth`}
+        description={`${total.toLocaleString()} materials · ${categoryCount} categories · single source of truth`}
         icon={Library}
         actions={
           <>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setCategoriesOpen(true)}>
+                <Layers className="size-4" /> Manage types
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleImport}>
               <Upload className="size-4" /> Import
             </Button>
@@ -54,6 +68,7 @@ export default function PartsPage() {
       <div className="min-h-0 flex-1">
         <PartsTable />
       </div>
+      <CategoryManagerDialog open={categoriesOpen} onOpenChange={setCategoriesOpen} />
     </div>
   );
 }

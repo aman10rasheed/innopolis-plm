@@ -27,9 +27,10 @@ import { Thumbnail } from "@/components/shared/thumbnail";
 import { Section, Field } from "@/components/shared/form-fields";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
-import { db } from "@/mock/db";
 import { FINISHES, COMPLIANCE_POOL } from "@/mock/pools";
-import type { Part, Lifecycle, SourcingType, Availability, ComplianceFlag } from "@/types";
+import { useUpdatePart } from "@/lib/api";
+import type { ApiPartInput } from "@/lib/api";
+import type { Part, Supplier, Lifecycle, SourcingType, Availability, ComplianceFlag } from "@/types";
 
 const LIFECYCLES: Lifecycle[] = ["Concept", "In Design", "In Review", "Released", "Production", "Obsolete"];
 const SOURCING: SourcingType[] = ["Make", "Buy", "Standard"];
@@ -70,16 +71,16 @@ type FormValues = z.input<typeof schema>;
  */
 export function EditPartDialog({
   part,
+  vendors,
   onOpenChange,
-  onSave,
 }: {
   part: Part | null;
+  vendors: Supplier[];
   onOpenChange: (v: boolean) => void;
-  onSave: (patch: Partial<Part>) => void;
 }) {
-  const suppliers = React.useMemo(() => db().suppliers, []);
+  const suppliers = vendors;
+  const updatePart = useUpdatePart();
   const [compliance, setCompliance] = React.useState<ComplianceFlag[]>([]);
-  const [submitting, setSubmitting] = React.useState(false);
 
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -115,42 +116,43 @@ export function EditPartDialog({
     setCompliance(part.compliance);
   }, [part, reset]);
 
-  const submit = handleSubmit((v) => {
+  const submit = handleSubmit(async (v) => {
     if (!part) return;
-    setSubmitting(true);
-    setTimeout(() => {
-      const patch: Partial<Part> = {
-        name: v.name,
-        description: v.description || part.description,
-        material: v.material,
-        finish: v.finish,
-        make: v.make || "—",
-        model: v.model || "—",
-        drawingRef: v.drawingRef || part.drawingRef,
-        revision: v.revision,
-        lifecycle: v.lifecycle as Lifecycle,
-        sourcing: v.sourcing as SourcingType,
-        availability: v.availability as Availability,
-        supplierId: v.supplierId,
-        weightKg: Number(v.weightKg),
-        unitCost: Number(v.unitCost),
-        lastPurchasePrice: Number(v.lastPurchasePrice),
-        leadTimeDays: Number(v.leadTimeDays),
-        uom: v.uom,
-        stockQty: Number(v.stockQty),
-        reorderPoint: Number(v.reorderPoint),
-        minStock: Number(v.minStock),
-        maxStock: Number(v.maxStock),
-        stockLocation: v.stockLocation || part.stockLocation,
-        compliance,
-        updatedAt: new Date().toISOString(),
-      };
-      setSubmitting(false);
-      onSave(patch);
+    const body: Partial<ApiPartInput> = {
+      name: v.name,
+      description: v.description || part.description,
+      material: v.material,
+      finish: v.finish,
+      make: v.make || "—",
+      model: v.model || "—",
+      drawing_ref: v.drawingRef || part.drawingRef,
+      revision: v.revision,
+      lifecycle: v.lifecycle as Lifecycle,
+      sourcing: v.sourcing as SourcingType,
+      availability: v.availability as Availability,
+      supplier_id: v.supplierId,
+      weight_kg: Number(v.weightKg),
+      unit_cost: Number(v.unitCost),
+      last_purchase_price: Number(v.lastPurchasePrice),
+      lead_time_days: Number(v.leadTimeDays),
+      uom: v.uom,
+      stock_qty: Number(v.stockQty),
+      reorder_point: Number(v.reorderPoint),
+      min_stock: Number(v.minStock),
+      max_stock: Number(v.maxStock),
+      stock_location: v.stockLocation || part.stockLocation,
+      compliance,
+    };
+    try {
+      await updatePart.mutateAsync({ id: part.id, body });
       toast.success("Material updated", `${part.partNumber} · ${v.name}`);
       onOpenChange(false);
-    }, 400);
+    } catch (e) {
+      toast.error("Could not update material", e instanceof Error ? e.message : "Please retry");
+    }
   });
+
+  const submitting = updatePart.isPending;
 
   return (
     <Dialog open={!!part} onOpenChange={onOpenChange}>

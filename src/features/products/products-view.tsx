@@ -23,8 +23,9 @@ import {
   Activity as ActivityIcon,
   User as UserIcon,
 } from "lucide-react";
-import { db, getUser } from "@/mock/db";
-import type { Product, ProjectStage } from "@/types";
+import { useProjects, useUsers, useBoms, useRfqs } from "@/lib/api";
+import { QueryBoundary } from "@/components/shared/query-boundary";
+import type { Product, ProjectStage, Eco } from "@/types";
 import { PROJECT_STAGES } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -50,15 +51,28 @@ import {
   cn,
 } from "@/lib/utils";
 import { monthlySeries } from "@/mock/series";
-
-const FAMILIES = [...new Set(db().products.map((p) => p.family))];
+import type { ApiUserFull } from "@/lib/api";
 
 function healthColor(h: number) {
   return h > 80 ? "bg-success" : h > 60 ? "bg-warning" : "bg-destructive";
 }
 
+/** Look up an engineer/owner by id from the fetched users list. */
+type UserLike = Pick<ApiUserFull, "name" | "initials" | "hue" | "role">;
+
 export function ProductsView() {
-  const projects = db().products;
+  const q = useProjects();
+  const projects = q.data?.items ?? [];
+  const usersQuery = useUsers();
+  const usersById = React.useMemo(() => {
+    const m = new Map<string, UserLike>();
+    for (const u of usersQuery.data?.items ?? []) m.set(u.id, u);
+    return m;
+  }, [usersQuery.data]);
+  const FAMILIES = React.useMemo(
+    () => [...new Set(projects.map((p) => p.family))],
+    [projects],
+  );
   const [query, setQuery] = React.useState("");
   const [family, setFamily] = React.useState<string | null>(null);
   const [stage, setStage] = React.useState<ProjectStage | null>(null);
@@ -86,6 +100,13 @@ export function ProductsView() {
   }, [projects, family, stage, query]);
 
   return (
+    <QueryBoundary
+      isLoading={q.isLoading}
+      isError={q.isError}
+      error={q.error}
+      onRetry={q.refetch}
+      className="h-full"
+    >
     <div className="flex h-full min-h-0 flex-col">
       {/* ── Lifecycle pipeline rail ────────────────────────────────── */}
       <PipelineRail
@@ -172,7 +193,7 @@ export function ProductsView() {
         {view === "grid" ? (
           <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((p) => (
-              <ProjectCard key={p.id} project={p} onOpen={() => setActive(p)} />
+              <ProjectCard key={p.id} project={p} engineer={usersById.get(p.engineerId)} onOpen={() => setActive(p)} />
             ))}
           </div>
         ) : (
@@ -189,7 +210,7 @@ export function ProductsView() {
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                     {group.map((p) => (
-                      <ProjectCard key={p.id} project={p} onOpen={() => setActive(p)} />
+                      <ProjectCard key={p.id} project={p} engineer={usersById.get(p.engineerId)} onOpen={() => setActive(p)} />
                     ))}
                   </div>
                 </section>
@@ -202,8 +223,9 @@ export function ProductsView() {
         )}
       </ScrollArea>
 
-      <ProjectDrawer project={active} onClose={() => setActive(null)} />
+      <ProjectDrawer project={active} engineer={active ? usersById.get(active.engineerId) : undefined} onClose={() => setActive(null)} />
     </div>
+    </QueryBoundary>
   );
 }
 
@@ -291,8 +313,7 @@ function PipelineRail({
 /* ════════════════════════════════════════════════════════════════════
  *  Project card
  * ════════════════════════════════════════════════════════════════════ */
-function ProjectCard({ project: p, onOpen }: { project: Product; onOpen: () => void }) {
-  const engineer = getUser(p.engineerId);
+function ProjectCard({ project: p, engineer, onOpen }: { project: Product; engineer?: UserLike; onOpen: () => void }) {
   return (
     <Card interactive onClick={onOpen} className="flex flex-col p-4">
       <div className="flex items-start gap-3">
@@ -364,7 +385,7 @@ function ProjectCard({ project: p, onOpen }: { project: Product; onOpen: () => v
 /* ════════════════════════════════════════════════════════════════════
  *  Detail drawer
  * ════════════════════════════════════════════════════════════════════ */
-function ProjectDrawer({ project, onClose }: { project: Product | null; onClose: () => void }) {
+function ProjectDrawer({ project, engineer, onClose }: { project: Product | null; engineer?: UserLike; onClose: () => void }) {
   return (
     <AnimatePresence>
       {project && (
@@ -383,7 +404,7 @@ function ProjectDrawer({ project, onClose }: { project: Product | null; onClose:
             transition={{ type: "spring", stiffness: 360, damping: 36 }}
             className="fixed right-0 top-0 z-[141] flex h-full w-[540px] max-w-[94vw] flex-col border-l border-border bg-surface-overlay shadow-lg"
           >
-            <ProjectDrawerBody project={project} onClose={onClose} />
+            <ProjectDrawerBody project={project} engineer={engineer} onClose={onClose} />
           </motion.aside>
         </>
       )}
@@ -391,11 +412,12 @@ function ProjectDrawer({ project, onClose }: { project: Product | null; onClose:
   );
 }
 
-function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: () => void }) {
-  const engineer = getUser(project.engineerId);
-  const boms = db().projectBoms.filter((b) => b.projectId === project.id);
-  const rfqs = db().rfqs.filter((r) => r.projectId === project.id);
-  const ecos = db().ecos.filter((e) => e.productId === project.id);
+function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; engineer?: UserLike; onClose: () => void }) {
+  const boms = (useBoms({ project_id: project.id }).data?.items ?? []).filter((b) => b.projectId === project.id);
+  const rfqs = (useRfqs({ project_id: project.id }).data?.items ?? []).filter((r) => r.projectId === project.id);
+  // No ECO/change-request endpoint is exposed by the API layer, so project
+  // activity has no data source yet — the Activity tab renders its empty state.
+  const ecos: Eco[] = [];
   const series = React.useMemo(
     () => monthlySeries(project.thumbnailHue, project.unitCost / 12, 30, 400),
     [project],

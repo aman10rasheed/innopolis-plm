@@ -4,7 +4,7 @@ import * as React from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Boxes, Sparkles, Check, ShieldCheck, Tag, Loader2 } from "lucide-react";
+import { Boxes, Sparkles, Check, ShieldCheck, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -27,28 +27,20 @@ import { Thumbnail } from "@/components/shared/thumbnail";
 import { Section, Field } from "@/components/shared/form-fields";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
-import { db } from "@/mock/db";
-import {
-  MATERIAL_CATEGORIES,
-  CATEGORY_BY_NAME,
-  MAJOR_SPECS,
-  GRADES,
-  FINISHES,
-  COMPLIANCE_POOL,
-  buildMaterialCode,
-} from "@/mock/pools";
-import type { Part, PartCategory, Lifecycle, SourcingType } from "@/types";
+import { FINISHES, COMPLIANCE_POOL } from "@/mock/pools";
+import { useMaterialMasters, useSubtypes, useCreatePart } from "@/lib/api";
+import type { ApiPartInput } from "@/lib/api";
+import type { Supplier, Lifecycle, SourcingType, ComplianceFlag } from "@/types";
 
 const LIFECYCLES: Lifecycle[] = ["Concept", "In Design", "In Review", "Released", "Production"];
 const SOURCING: SourcingType[] = ["Make", "Buy", "Standard"];
-const REVS = ["A", "B", "C", "D"];
 const MAKES = ["Inox", "L&T", "KSB", "Grundfos", "Endress+Hauser", "Emerson", "Siemens", "ABB", "Alfa Laval"];
 
 const schema = z.object({
-  category: z.string().min(1, "Select a type"),
-  subTypeCode: z.string().min(1, "Select a subtype"),
-  majorSpec: z.string().min(1),
-  detailSpec: z.string().min(1),
+  categoryId: z.string().min(1, "Select a type"),
+  subtypeId: z.string().min(1, "Select a subtype"),
+  majorSpecId: z.string().min(1),
+  gradeId: z.string().min(1),
   name: z.string().min(2, "Description is required"),
   description: z.string().optional(),
   material: z.string().min(1),
@@ -84,7 +76,7 @@ function CodeBuilder({ type, sub, major, detail }: { type: string; sub: string; 
     <div className="rounded-xl border border-primary/30 bg-primary/[0.06] p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-2xs font-semibold uppercase tracking-wider text-primary">Material Code</span>
-        <span className="font-mono text-2xs text-muted-foreground">TT-SS-MM-DDDD</span>
+        <span className="font-mono text-2xs text-muted-foreground">TT-SS-MM-DDDD · server-generated</span>
       </div>
       <div className="flex items-center gap-1.5">
         {segs.map((s, i) => (
@@ -106,18 +98,25 @@ function CodeBuilder({ type, sub, major, detail }: { type: string; sub: string; 
 export function CreatePartDialog({
   open,
   onOpenChange,
-  onCreate,
+  vendors,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onCreate: (part: Part) => void;
+  vendors: Supplier[];
+  onCreated?: () => void;
 }) {
-  const suppliers = React.useMemo(() => db().suppliers, []);
-  const [compliance, setCompliance] = React.useState<string[]>(["ASME", "3.1 Cert"]);
-  const [submitting, setSubmitting] = React.useState(false);
+  const mastersQuery = useMaterialMasters();
+  const createPart = useCreatePart();
+
+  const categories = mastersQuery.data?.categories ?? [];
+  const majorSpecs = mastersQuery.data?.majorSpecs ?? [];
+  const grades = mastersQuery.data?.grades ?? [];
+
+  const [compliance, setCompliance] = React.useState<ComplianceFlag[]>(["ASME", "3.1 Cert"] as ComplianceFlag[]);
 
   const defaults: FormValues = {
-    category: "", subTypeCode: "", majorSpec: "15", detailSpec: "3040",
+    categoryId: "", subtypeId: "", majorSpecId: "", gradeId: "",
     name: "", description: "", material: "SS 304", finish: "Pickled & Passivated",
     make: "", model: "", drawingRef: "", revision: "A", lifecycle: "In Design", sourcing: "Buy",
     supplierId: "", unitCost: 0, lastPurchasePrice: 0, leadTimeDays: 14, uom: "Nos",
@@ -127,87 +126,81 @@ export function CreatePartDialog({
   const { register, handleSubmit, control, reset, setValue, watch, formState: { errors } } =
     useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: defaults });
 
-  const category = watch("category") as PartCategory | "";
-  const subTypeCode = watch("subTypeCode");
-  const majorSpec = watch("majorSpec");
-  const detailSpec = watch("detailSpec");
-  const catDef = category ? CATEGORY_BY_NAME[category as PartCategory] : null;
-  const typeCode = catDef?.type ?? "";
+  const categoryId = watch("categoryId");
+  const subtypeId = watch("subtypeId");
+  const majorSpecId = watch("majorSpecId");
+  const gradeId = watch("gradeId");
 
-  // auto-derive name, material, uom from the chosen code segments
+  const subtypesQuery = useSubtypes(categoryId || undefined);
+  const subtypes = subtypesQuery.data ?? [];
+
+  const category = categories.find((c) => c.id === categoryId);
+  const subtype = subtypes.find((s) => s.id === subtypeId);
+  const majorSpec = majorSpecs.find((m) => m.id === majorSpecId);
+  const grade = grades.find((g) => g.id === gradeId);
+
+  const typeCode = category?.type_code ?? "";
+
+  // auto-derive name, material, uom from the chosen master selections
   React.useEffect(() => {
-    if (catDef && subTypeCode) {
-      const sub = catDef.subtypes.find((s) => s.code === subTypeCode);
-      const grade = GRADES.find((g) => g.code === detailSpec);
-      if (sub && grade) {
-        const size = majorSpec === "00" ? "" : ` ${majorSpec} ${catDef.uom === "Mtr" ? "NB" : "mm"}`;
-        setValue("name", `${grade.label} ${sub.name}${size}`.trim());
-        setValue("material", grade.label);
-      }
-      setValue("uom", catDef.uom);
+    if (subtype && grade) {
+      const size = majorSpec && majorSpec.code !== "00" ? ` ${majorSpec.label}` : "";
+      setValue("name", `${grade.label} ${subtype.name}${size}`.trim());
+      setValue("material", grade.label);
     }
-  }, [catDef, subTypeCode, majorSpec, detailSpec, setValue]);
+    if (category?.default_uom) setValue("uom", category.default_uom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtypeId, majorSpecId, gradeId, categoryId]);
 
   React.useEffect(() => {
-    if (open) { reset(defaults); setCompliance(["ASME", "3.1 Cert"]); }
+    if (open) { reset(defaults); setCompliance(["ASME", "3.1 Cert"] as ComplianceFlag[]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const hue = React.useMemo(() => (typeCode || "MB").split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360, [typeCode]);
 
   const submit = (another: boolean) =>
-    handleSubmit((v) => {
-      setSubmitting(true);
-      setTimeout(() => {
-        const code = buildMaterialCode(typeCode, v.subTypeCode, v.majorSpec, v.detailSpec);
-        const sub = catDef?.subtypes.find((s) => s.code === v.subTypeCode);
-        const part: Part = {
-          id: `P-new-${Date.now()}`,
-          partNumber: code,
-          materialType: typeCode,
-          subType: sub?.name ?? "",
-          subTypeCode: v.subTypeCode,
-          majorSpec: v.majorSpec,
-          detailSpec: v.detailSpec,
-          name: v.name,
-          category: v.category as PartCategory,
-          description: v.description || `${v.material} ${v.name.toLowerCase()}.`,
-          material: v.material,
-          finish: v.finish,
-          revision: v.revision,
-          lifecycle: v.lifecycle as Lifecycle,
-          sourcing: v.sourcing as SourcingType,
-          weightKg: Math.round(Math.random() * 20 * 1000) / 1000,
-          unitCost: Number(v.unitCost),
-          lastPurchasePrice: Number(v.lastPurchasePrice) || Number(v.unitCost),
-          leadTimeDays: Number(v.leadTimeDays),
-          supplierId: v.supplierId,
-          manufacturerPartNumber: v.model || `MPN-${Math.floor(10000 + Math.random() * 89999)}`,
-          make: v.make || "—",
-          model: v.model || "—",
-          drawingRef: v.drawingRef || `DRG-${typeCode}-${Math.floor(1000 + Math.random() * 8999)}`,
-          availability: "In Stock",
-          stockQty: 0,
-          reorderPoint: Number(v.reorderPoint),
-          minStock: Number(v.minStock),
-          maxStock: Number(v.maxStock),
-          stockLocation: v.stockLocation || "WH-A · Rack 01",
-          uom: v.uom,
-          compliance: compliance as Part["compliance"],
-          tags: [],
-          ownerId: db().users[0]!.id,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          thumbnailHue: hue,
-          whereUsedCount: 0,
-        };
-        setSubmitting(false);
-        onCreate(part);
-        toast.success("Material created", `${part.partNumber} · ${part.name}`);
-        if (another) { reset(defaults); setCompliance(["ASME", "3.1 Cert"]); }
+    handleSubmit(async (v) => {
+      const body: ApiPartInput = {
+        category_id: v.categoryId,
+        subtype_id: v.subtypeId,
+        major_spec_id: v.majorSpecId || undefined,
+        grade_id: v.gradeId || undefined,
+        name: v.name,
+        description: v.description || `${v.material} ${v.name.toLowerCase()}.`,
+        material: v.material,
+        finish: v.finish,
+        revision: v.revision,
+        lifecycle: v.lifecycle as Lifecycle,
+        sourcing: v.sourcing as SourcingType,
+        unit_cost: Number(v.unitCost),
+        last_purchase_price: Number(v.lastPurchasePrice) || Number(v.unitCost),
+        lead_time_days: Number(v.leadTimeDays),
+        supplier_id: v.supplierId,
+        make: v.make || undefined,
+        model: v.model || undefined,
+        drawing_ref: v.drawingRef || undefined,
+        reorder_point: Number(v.reorderPoint),
+        min_stock: Number(v.minStock),
+        max_stock: Number(v.maxStock),
+        stock_location: v.stockLocation || undefined,
+        uom: v.uom,
+        compliance,
+        tags: [],
+        thumbnail_hue: hue,
+      };
+      try {
+        const created = await createPart.mutateAsync(body);
+        toast.success("Material created", `${created.part_number} · ${created.name}`);
+        onCreated?.();
+        if (another) { reset(defaults); setCompliance(["ASME", "3.1 Cert"] as ComplianceFlag[]); }
         else onOpenChange(false);
-      }, 550);
+      } catch (e) {
+        toast.error("Could not create material", e instanceof Error ? e.message : "Check the fields and try again");
+      }
     });
+
+  const submitting = createPart.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -217,7 +210,7 @@ export function CreatePartDialog({
           <div className="flex-1">
             <DialogTitle className="text-base">Create Material Master Record</DialogTitle>
             <DialogDescription className="text-[13px]">
-              Each material exists once. The intelligent code is generated from your selections.
+              Each material exists once. The intelligent code is generated by the server from your selections.
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -227,27 +220,27 @@ export function CreatePartDialog({
             {/* Code builder */}
             <Section title="Intelligent Code">
               <div className="grid grid-cols-4 gap-3">
-                <Field label="Type (TT)" error={errors.category?.message as string} className="col-span-1">
-                  <Controller control={control} name="category" render={({ field }) => (
-                    <Select value={field.value} onValueChange={(val) => { field.onChange(val); setValue("subTypeCode", ""); }}>
+                <Field label="Type (TT)" error={errors.categoryId?.message as string} className="col-span-1">
+                  <Controller control={control} name="categoryId" render={({ field }) => (
+                    <Select value={field.value} onValueChange={(val) => { field.onChange(val); setValue("subtypeId", ""); }} disabled={mastersQuery.isLoading}>
                       <SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {MATERIAL_CATEGORIES.map((c) => (
-                          <SelectItem key={c.name} value={c.name}>
-                            <span className="font-mono text-2xs text-primary">{c.type}</span> {c.name}
+                        {categories.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            <span className="font-mono text-2xs text-primary">{c.type_code}</span> {c.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )} />
                 </Field>
-                <Field label="Subtype (SS)" error={errors.subTypeCode?.message as string}>
-                  <Controller control={control} name="subTypeCode" render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange} disabled={!catDef}>
+                <Field label="Subtype (SS)" error={errors.subtypeId?.message as string}>
+                  <Controller control={control} name="subtypeId" render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange} disabled={!categoryId || subtypesQuery.isLoading}>
                       <SelectTrigger><SelectValue placeholder="Subtype" /></SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {catDef?.subtypes.map((s) => (
-                          <SelectItem key={s.code} value={s.code}>
+                        {subtypes.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
                             <span className="font-mono text-2xs text-primary">{s.code}</span> {s.name}
                           </SelectItem>
                         ))}
@@ -255,29 +248,37 @@ export function CreatePartDialog({
                     </Select>
                   )} />
                 </Field>
-                <Field label="Major (MM)">
-                  <Controller control={control} name="majorSpec" render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                <Field label="Major (MM)" error={errors.majorSpecId?.message as string}>
+                  <Controller control={control} name="majorSpecId" render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange} disabled={mastersQuery.isLoading}>
+                      <SelectTrigger><SelectValue placeholder="Spec" /></SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {MAJOR_SPECS.map((m) => <SelectItem key={m} value={m}>{m === "00" ? "00 (n/a)" : `${m} mm`}</SelectItem>)}
+                        {majorSpecs.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            <span className="font-mono text-2xs text-primary">{m.code}</span> {m.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   )} />
                 </Field>
-                <Field label="Detail (DDDD)">
-                  <Controller control={control} name="detailSpec" render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                <Field label="Detail (DDDD)" error={errors.gradeId?.message as string}>
+                  <Controller control={control} name="gradeId" render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange} disabled={mastersQuery.isLoading}>
+                      <SelectTrigger><SelectValue placeholder="Grade" /></SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {GRADES.map((g) => <SelectItem key={g.code} value={g.code}><span className="font-mono text-2xs text-primary">{g.code}</span> {g.label}</SelectItem>)}
+                        {grades.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            <span className="font-mono text-2xs text-primary">{g.code}</span> {g.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   )} />
                 </Field>
               </div>
               <div className="mt-3">
-                <CodeBuilder type={typeCode} sub={subTypeCode} major={majorSpec} detail={detailSpec} />
+                <CodeBuilder type={typeCode} sub={subtype?.code ?? ""} major={majorSpec?.code ?? ""} detail={grade?.code ?? ""} />
               </div>
             </Section>
 
@@ -334,7 +335,7 @@ export function CreatePartDialog({
                     <Select value={field.value} onValueChange={field.onChange}>
                       <SelectTrigger><SelectValue placeholder="Select vendor" /></SelectTrigger>
                       <SelectContent className="max-h-64">
-                        {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} · {s.country}</SelectItem>)}
+                        {vendors.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} · {s.country}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   )} />
@@ -375,10 +376,10 @@ export function CreatePartDialog({
               </Label>
               <div className="flex flex-wrap gap-1.5">
                 {COMPLIANCE_POOL.map((c) => {
-                  const on = compliance.includes(c);
+                  const on = compliance.includes(c as ComplianceFlag);
                   return (
                     <button key={c} type="button"
-                      onClick={() => setCompliance((p) => (on ? p.filter((x) => x !== c) : [...p, c]))}
+                      onClick={() => setCompliance((p) => (on ? p.filter((x) => x !== c) : [...p, c as ComplianceFlag]))}
                       className={cn("flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors",
                         on ? "border-success/40 bg-success/10 text-success" : "border-border text-muted-foreground hover:bg-accent")}>
                       {on && <Check className="size-3" />} {c}

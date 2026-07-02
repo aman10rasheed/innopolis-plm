@@ -5,11 +5,12 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { BoardFilterButton } from "@/components/shared/board-filter-button";
 import { BomApprovalsBoard } from "@/features/bom-approvals/bom-approvals-board";
-import { db } from "@/mock/db";
+import { useBoms } from "@/lib/api";
 import { useUIStore } from "@/stores/ui-store";
 
 export default function BomApprovalsPage() {
-  const pending = db().projectBoms.filter((b) => b.stage !== "Released for Purchase").length;
+  const boms = useBoms().data?.items ?? [];
+  const pending = boms.filter((b) => b.stage !== "Released for Purchase").length;
   const setCreateBomOpen = useUIStore((s) => s.setCreateBomOpen);
   return (
     <div className="flex h-full flex-col">

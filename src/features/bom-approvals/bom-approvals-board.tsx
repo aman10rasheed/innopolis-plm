@@ -16,14 +16,16 @@ import {
   Check,
 } from "lucide-react";
 import {
-  db,
-  getUser,
-  addProjectBom,
-  updateProjectBom,
-  deleteProjectBom,
-} from "@/mock/db";
+  useBoms,
+  useUsers,
+  useCreateBom,
+  useUpdateBom,
+  useDeleteBom,
+  useTransitionBom,
+} from "@/lib/api";
 import { BOM_STAGES } from "@/types";
 import type { ProjectBom, BomStage } from "@/types";
+import type { ApiUserFull } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,89 +46,114 @@ import { cn, formatCompactCurrency, formatDate } from "@/lib/utils";
 import { BOM_STAGE_COLOR, BOM_STAGE_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
 import { useUIStore } from "@/stores/ui-store";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 
 const BOM_TYPES: ProjectBom["bomType"][] = ["Engineering", "Procurement", "Final Released"];
 const REVS = ["A", "B", "C", "D"];
-const rnd = (n: number) => Math.floor(Math.random() * n);
-const nowISO = () => new Date().toISOString();
 
 export function BomApprovalsBoard() {
-  const [boms, setBoms] = React.useState<ProjectBom[]>(() => db().projectBoms.slice());
+  const bomsQuery = useBoms();
+  const usersQuery = useUsers();
+
+  return (
+    <QueryBoundary
+      isLoading={bomsQuery.isLoading}
+      isError={bomsQuery.isError}
+      error={bomsQuery.error}
+      onRetry={() => bomsQuery.refetch()}
+    >
+      <Board
+        boms={bomsQuery.data?.items ?? []}
+        users={usersQuery.data?.items ?? []}
+      />
+    </QueryBoundary>
+  );
+}
+
+function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
   const typeFilter = useUIStore((s) => s.boardFilters["bomApprovals"] ?? "");
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [overCol, setOverCol] = React.useState<BomStage | null>(null);
   const [editId, setEditId] = React.useState<string | null>(null);
 
-  const editing = boms.find((b) => b.id === editId) ?? null;
-  const auditEntry = (stage: BomStage) => ({ stage, userId: db().users[0]!.id, date: nowISO(), comment: `Moved to ${stage}.` });
+  const userById = React.useMemo(() => {
+    const m = new Map<string, ApiUserFull>();
+    for (const u of users) m.set(u.id, u);
+    return m;
+  }, [users]);
 
-  const move = (id: string, stage: BomStage) => {
+  const createBom = useCreateBom();
+  const updateBom = useUpdateBom();
+  const deleteBom = useDeleteBom();
+  const transitionBom = useTransitionBom();
+
+  const editing = boms.find((b) => b.id === editId) ?? null;
+
+  // The API workflow is a linear pipeline; moving forward = advance, backward = reject.
+  const move = async (id: string, stage: BomStage) => {
     const bom = boms.find((b) => b.id === id);
     if (!bom || bom.stage === stage) return;
-    const audit = [...bom.audit, auditEntry(stage)];
-    setBoms((prev) => prev.map((b) => (b.id === id ? { ...b, stage, updatedAt: nowISO(), audit } : b)));
-    updateProjectBom(id, { stage, updatedAt: nowISO(), audit });
-    toast.success("BOM advanced", `${bom.number} → ${stage}`);
+    const from = BOM_STAGES.indexOf(bom.stage);
+    const to = BOM_STAGES.indexOf(stage);
+    const action: "advance" | "reject" = to > from ? "advance" : "reject";
+    try {
+      await transitionBom.mutateAsync({ id, action, comment: `Moved to ${stage}.` });
+      toast.success("BOM updated", `${bom.number} · ${action === "advance" ? "advanced" : "sent back"}`);
+    } catch (e) {
+      toast.error("Transition failed", e instanceof Error ? e.message : "Could not update BOM stage");
+    }
   };
 
-  const update = (id: string, patch: Partial<ProjectBom>) => {
-    setBoms((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
-    updateProjectBom(id, patch);
+  const saveEdit = async (id: string, patch: { bom_type?: string; revision?: string }) => {
+    const bom = boms.find((b) => b.id === id);
+    try {
+      await updateBom.mutateAsync({ id, body: patch });
+      toast.success("Saved", bom?.number ?? "BOM");
+    } catch (e) {
+      toast.error("Save failed", e instanceof Error ? e.message : "Could not save BOM");
+    }
   };
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     const bom = boms.find((b) => b.id === id);
     if (!bom) return;
-    setBoms((prev) => prev.filter((b) => b.id !== id));
-    deleteProjectBom(id);
     if (editId === id) setEditId(null);
-    toast({
-      title: "BOM deleted",
-      description: bom.number,
-      variant: "warning",
-      action: { label: "Undo", onClick: () => { addProjectBom(bom); setBoms((prev) => [bom, ...prev]); } },
-    });
+    try {
+      await deleteBom.mutateAsync(id);
+      toast({ title: "BOM deleted", description: bom.number, variant: "warning" });
+    } catch (e) {
+      toast.error("Delete failed", e instanceof Error ? e.message : "Could not delete BOM");
+    }
   };
 
-  const duplicate = (src: ProjectBom) => {
-    const copy: ProjectBom = {
-      ...src,
-      id: `PB-new-${Date.now()}`,
-      number: `BOM-${7000 + rnd(999)}`,
-      stage: "Draft",
-      audit: [{ stage: "Draft", userId: db().users[0]!.id, date: nowISO(), comment: "Cloned from existing BOM." }],
-    };
-    addProjectBom(copy);
-    setBoms((prev) => [copy, ...prev]);
-    toast.success("Duplicated", copy.number);
+  const duplicate = async (src: ProjectBom) => {
+    try {
+      const created = await createBom.mutateAsync({
+        project_id: src.projectId,
+        bom_type: src.bomType,
+        revision: src.revision,
+      });
+      toast.success("Duplicated", created.number);
+    } catch (e) {
+      toast.error("Duplicate failed", e instanceof Error ? e.message : "Could not duplicate BOM");
+    }
   };
 
-  const addCard = (stage: BomStage) => {
-    const product = db().products[0]!;
-    const me = db().users[0]!;
-    const bom: ProjectBom = {
-      id: `PB-new-${Date.now()}`,
-      number: `BOM-${7000 + rnd(999)}`,
-      projectId: product.id,
-      projectNumber: product.projectNumber,
-      projectName: product.name,
-      customer: product.customer,
-      revision: "A",
-      stage,
-      bomType: "Engineering",
-      lineItems: 0,
-      uniqueMaterials: 0,
-      totalValue: 0,
-      criticalItems: 0,
-      longLeadItems: 0,
-      ownerId: me.id,
-      createdAt: nowISO(),
-      updatedAt: nowISO(),
-      audit: [{ stage, userId: me.id, date: nowISO(), comment: "Draft created." }],
-    };
-    addProjectBom(bom);
-    setBoms((prev) => [bom, ...prev]);
-    setEditId(bom.id);
+  // New draft BOMs always open in Draft on the backend; reuse the project from any
+  // existing BOM (or first available) since a project reference is required.
+  const addCard = async () => {
+    const projectId = boms[0]?.projectId;
+    if (!projectId) {
+      toast.error("No project available", "Create a project before drafting a BOM.");
+      return;
+    }
+    try {
+      const created = await createBom.mutateAsync({ project_id: projectId, bom_type: "Engineering", revision: "A" });
+      toast.success("BOM drafted", created.number);
+      setEditId(created.id);
+    } catch (e) {
+      toast.error("Create failed", e instanceof Error ? e.message : "Could not draft BOM");
+    }
   };
 
   return (
@@ -151,7 +178,7 @@ export function BomApprovalsBoard() {
                 <span className="text-[13px] font-semibold">{col}</span>
                 <Badge variant="muted" className="ml-0.5">{items.length}</Badge>
                 <span className="ml-auto text-2xs text-muted-foreground tabular">{value > 0 && formatCompactCurrency(value)}</span>
-                <button onClick={() => addCard(col)} title={`Add BOM to ${col}`} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <button onClick={addCard} title="Draft a new BOM" className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
                   <Plus className="size-3.5" />
                 </button>
               </div>
@@ -159,7 +186,7 @@ export function BomApprovalsBoard() {
               <div className="flex-1 space-y-2 overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
                   {items.map((b) => {
-                    const owner = getUser(b.ownerId);
+                    const owner = userById.get(b.ownerId);
                     return (
                       <ContextMenu key={b.id}>
                         <ContextMenuTrigger asChild>
@@ -217,7 +244,7 @@ export function BomApprovalsBoard() {
                   })}
                 </AnimatePresence>
                 {items.length === 0 && (
-                  <button onClick={() => addCard(col)} className="flex h-20 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-2xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+                  <button onClick={addCard} className="flex h-20 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-2xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
                     <Plus className="size-3.5" /> Add BOM
                   </button>
                 )}
@@ -229,8 +256,9 @@ export function BomApprovalsBoard() {
 
       <BomEditDrawer
         bom={editing}
+        userById={userById}
         onClose={() => setEditId(null)}
-        onSave={(patch) => { if (editing) { update(editing.id, patch); toast.success("Saved", editing.number); } }}
+        onSave={(patch) => { if (editing) saveEdit(editing.id, patch); }}
         onMove={(stage) => editing && move(editing.id, stage)}
         onDelete={() => editing && remove(editing.id)}
       />
@@ -240,14 +268,16 @@ export function BomApprovalsBoard() {
 
 function BomEditDrawer({
   bom,
+  userById,
   onClose,
   onSave,
   onMove,
   onDelete,
 }: {
   bom: ProjectBom | null;
+  userById: Map<string, ApiUserFull>;
   onClose: () => void;
-  onSave: (patch: Partial<ProjectBom>) => void;
+  onSave: (patch: { bom_type?: string; revision?: string }) => void;
   onMove: (stage: BomStage) => void;
   onDelete: () => void;
 }) {
@@ -292,21 +322,22 @@ function BomEditDrawer({
                     <SelectContent>{REVS.map((r) => <SelectItem key={r} value={r}>Rev {r}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
+                {/* Computed on the server from BOM lines — shown read-only. */}
                 <div className="space-y-1.5">
                   <Label>Line items</Label>
-                  <Input type="number" value={form.lineItems} onChange={(e) => setForm({ ...form, lineItems: Number(e.target.value) })} />
+                  <Input type="number" value={form.lineItems} readOnly disabled />
                 </div>
                 <div className="space-y-1.5">
                   <Label>BOM value</Label>
-                  <Input type="number" value={form.totalValue} onChange={(e) => setForm({ ...form, totalValue: Number(e.target.value) })} />
+                  <Input type="number" value={form.totalValue} readOnly disabled />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Critical items</Label>
-                  <Input type="number" value={form.criticalItems} onChange={(e) => setForm({ ...form, criticalItems: Number(e.target.value) })} />
+                  <Input type="number" value={form.criticalItems} readOnly disabled />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Long-lead items</Label>
-                  <Input type="number" value={form.longLeadItems} onChange={(e) => setForm({ ...form, longLeadItems: Number(e.target.value) })} />
+                  <Input type="number" value={form.longLeadItems} readOnly disabled />
                 </div>
                 <div className="col-span-2 space-y-1.5">
                   <Label>Stage</Label>
@@ -321,29 +352,33 @@ function BomEditDrawer({
                 <p className="mb-3 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <History className="size-3.5" /> Approval audit trail
                 </p>
-                <div className="relative space-y-0 pl-5">
-                  <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
-                  {form.audit.map((a, i) => {
-                    const user = getUser(a.userId);
-                    const isLast = i === form.audit.length - 1;
-                    return (
-                      <div key={i} className="relative pb-4">
-                        <div className={cn("absolute -left-5 top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-surface", isLast ? "bg-primary" : "bg-success")}>
-                          {!isLast && <CheckCircle2 className="size-2.5 text-white" />}
+                {form.audit.length === 0 ? (
+                  <p className="text-[13px] text-muted-foreground">No audit history yet.</p>
+                ) : (
+                  <div className="relative space-y-0 pl-5">
+                    <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
+                    {form.audit.map((a, i) => {
+                      const user = userById.get(a.userId);
+                      const isLast = i === form.audit.length - 1;
+                      return (
+                        <div key={i} className="relative pb-4">
+                          <div className={cn("absolute -left-5 top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-surface", isLast ? "bg-primary" : "bg-success")}>
+                            {!isLast && <CheckCircle2 className="size-2.5 text-white" />}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={BOM_STAGE_VARIANT[a.stage]}>{a.stage}</Badge>
+                            <span className="text-2xs text-muted-foreground">{formatDate(a.date, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                          </div>
+                          <p className="mt-1 text-[13px]">{a.comment}</p>
+                          <p className="mt-0.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
+                            <Avatar className="size-4"><AvatarFallback className="text-[7px]" style={{ background: `hsl(${user?.hue} 55% 22%)`, color: `hsl(${user?.hue} 80% 76%)` }}>{user?.initials}</AvatarFallback></Avatar>
+                            {user?.name}
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={BOM_STAGE_VARIANT[a.stage]}>{a.stage}</Badge>
-                          <span className="text-2xs text-muted-foreground">{formatDate(a.date, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        </div>
-                        <p className="mt-1 text-[13px]">{a.comment}</p>
-                        <p className="mt-0.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
-                          <Avatar className="size-4"><AvatarFallback className="text-[7px]" style={{ background: `hsl(${user?.hue} 55% 22%)`, color: `hsl(${user?.hue} 80% 76%)` }}>{user?.initials}</AvatarFallback></Avatar>
-                          {user?.name}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -353,7 +388,7 @@ function BomEditDrawer({
               </Button>
               <div className="ml-auto flex gap-2">
                 <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-                <Button size="sm" onClick={() => { onSave({ bomType: form.bomType, revision: form.revision, lineItems: form.lineItems, totalValue: form.totalValue, criticalItems: form.criticalItems, longLeadItems: form.longLeadItems }); onClose(); }}>
+                <Button size="sm" onClick={() => { onSave({ bom_type: form.bomType, revision: form.revision }); onClose(); }}>
                   <Check className="size-4" /> Save
                 </Button>
               </div>

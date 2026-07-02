@@ -21,6 +21,9 @@ import {
   LineTrend,
   MultiBar,
 } from "@/components/shared/charts";
+import { QueryBoundary } from "@/components/shared/query-boundary";
+import { useVendors } from "@/lib/api";
+// no backend endpoint — ecos, manufacturing heatmap & decorative series stay on mock
 import { db } from "@/mock/db";
 import {
   manufacturingProgress,
@@ -297,14 +300,16 @@ function ManufacturingTab() {
 
 /* ------------------------------------------------------------------ */
 function SupplyChainTab() {
-  const d = db();
-  const supplierPerf = React.useMemo(supplierPerfSeries, []);
+  // API-backed: vendor list drives risk / lead-time / counts
+  const vendorsQuery = useVendors();
+  const suppliers = vendorsQuery.data?.items ?? [];
+  const supplierPerf = React.useMemo(supplierPerfSeries, []); // no backend endpoint — mock retained
 
   const riskDistribution = React.useMemo(() => {
     let low = 0,
       med = 0,
       high = 0;
-    for (const s of d.suppliers) {
+    for (const s of suppliers) {
       if (s.riskScore < 33) low++;
       else if (s.riskScore < 66) med++;
       else high++;
@@ -314,7 +319,7 @@ function SupplyChainTab() {
       { name: "Medium risk", value: med, color: "hsl(var(--warning))" },
       { name: "High risk", value: high, color: "hsl(var(--destructive))" },
     ];
-  }, [d]);
+  }, [suppliers]);
 
   const leadTimeHistogram = React.useMemo(() => {
     const buckets = [
@@ -324,20 +329,25 @@ function SupplyChainTab() {
       { label: "46–60d", min: 46, max: 60, value: 0 },
       { label: "60d+", min: 61, max: Infinity, value: 0 },
     ];
-    for (const s of d.suppliers) {
+    for (const s of suppliers) {
       const b = buckets.find((b) => s.leadTimeAvg >= b.min && s.leadTimeAvg <= b.max);
       if (b) b.value++;
     }
     return buckets.map(({ label, value }) => ({ label, value }));
-  }, [d]);
+  }, [suppliers]);
 
   return (
-    <>
+    <QueryBoundary
+      isLoading={vendorsQuery.isLoading}
+      isError={vendorsQuery.isError}
+      error={vendorsQuery.error}
+      onRetry={() => vendorsQuery.refetch()}
+    >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Active Suppliers" value={formatNumber(d.suppliers.length)} delta={2.0} icon={Activity} accent="primary" />
+        <StatCard label="Active Suppliers" value={formatNumber(suppliers.length)} delta={2.0} icon={Activity} accent="primary" />
         <StatCard label="High-risk Suppliers" value={riskDistribution[2]!.value} delta={-1.0} icon={ShieldAlert} accent="destructive" invertDelta />
-        <StatCard label="Avg Lead Time" value={`${Math.round(d.suppliers.reduce((s, x) => s + x.leadTimeAvg, 0) / Math.max(1, d.suppliers.length))}d`} delta={-3.2} icon={Timer} accent="info" invertDelta />
-        <StatCard label="Open POs" value={formatNumber(d.suppliers.reduce((s, x) => s + x.openPOs, 0))} delta={4.5} icon={Activity} accent="warning" />
+        <StatCard label="Avg Lead Time" value={`${Math.round(suppliers.reduce((s, x) => s + x.leadTimeAvg, 0) / Math.max(1, suppliers.length))}d`} delta={-3.2} icon={Timer} accent="info" invertDelta />
+        <StatCard label="Open POs" value={formatNumber(suppliers.reduce((s, x) => s + x.openPOs, 0))} delta={4.5} icon={Activity} accent="warning" />
       </div>
 
       <Card>
@@ -402,12 +412,13 @@ function SupplyChainTab() {
           </CardContent>
         </Card>
       </div>
-    </>
+    </QueryBoundary>
   );
 }
 
 /* ------------------------------------------------------------------ */
 function EngineeringTab() {
+  // no backend endpoint — ecos/revisions have no API, mock retained
   const d = db();
   const ecoActivity = React.useMemo(() => {
     const opened = monthlySeries(53, 14, 0, 8);

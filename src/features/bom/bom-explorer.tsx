@@ -14,6 +14,7 @@ import {
   Download,
   GitCompare,
   Boxes,
+  ArrowLeft,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -44,15 +45,26 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Thumbnail } from "@/components/shared/thumbnail";
 import { DonutChart } from "@/components/shared/charts";
 import { useRouter } from "next/navigation";
-import { buildProjectBom, flattenBom, rootProjects, addProjectBomLine, whereUsed, db } from "@/mock/db";
-import type { BomNode } from "@/types";
+import { flattenBom } from "@/mock/db";
+import {
+  useProjects,
+  useBoms,
+  useBom,
+  useBomAnalysis,
+  useParts,
+  useAddBomLine,
+  useUpdateBomLine,
+  toNumber,
+} from "@/lib/api";
+import type { ApiBomDetail, ApiBomLine } from "@/lib/api";
+import type { BomNode, Product } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
 import { formatCurrency, formatNumber, cn } from "@/lib/utils";
-import { LIFECYCLE_VARIANT } from "@/constants/status";
+import { LIFECYCLE_VARIANT, PROJECT_STAGE_VARIANT } from "@/constants/status";
 import { toast } from "@/components/ui/toast";
 import { downloadCsv, copyToClipboard } from "@/lib/export";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 
-const ROOTS = rootProjects();
 const LEVEL_COLORS = [
   "border-l-primary",
   "border-l-info",
@@ -63,24 +75,302 @@ const LEVEL_COLORS = [
 ];
 
 export function BomExplorer() {
+  const [rootId, setRootId] = React.useState<string | null>(null);
+
+  if (rootId == null) {
+    return <ProjectPicker onSelect={setRootId} />;
+  }
+
+  return (
+    <BomView
+      key={rootId}
+      rootId={rootId}
+      onSelect={setRootId}
+      onBack={() => setRootId(null)}
+    />
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Tree assembly — the API returns flat BOM lines; we build the same BomNode
+ * tree shape the mock's buildProjectBom produced so the render code is reused.
+ * ------------------------------------------------------------------------- */
+function lineToNode(line: ApiBomLine): BomNode {
+  const qty = toNumber(line.quantity);
+  const unitCost = toNumber(line.unit_cost);
+  const extended = toNumber(line.extended_cost);
+  return {
+    id: line.id,
+    refId: line.part_id,
+    type: "part",
+    partNumber: line.part_number,
+    name: line.name,
+    category: line.category as BomNode["category"],
+    quantity: qty,
+    uom: line.uom,
+    unitCost,
+    extendedCost: extended || Math.round(unitCost * qty * 100) / 100,
+    lifecycle: (line as { lifecycle?: BomNode["lifecycle"] }).lifecycle ?? "Released",
+    revision: line.material_revision,
+    refDesignator: line.ref_designator ?? undefined,
+    leadTimeDays: line.lead_time_days,
+    procurement: line.procurement,
+    level: Math.max(1, line.level || 1),
+    findNumber: line.find_number,
+    hasIssue: line.is_critical === true,
+    isDuplicate: false,
+  };
+}
+
+/** Flag part ids that appear on more than one line (mirrors mock markDuplicates). */
+function markDuplicates(root: BomNode) {
+  const counts = new Map<string, number>();
+  const walk = (n: BomNode) => {
+    if (n.type === "part") counts.set(n.refId, (counts.get(n.refId) ?? 0) + 1);
+    n.children?.forEach(walk);
+  };
+  walk(root);
+  const dupSet = new Set([...counts.entries()].filter(([, c]) => c > 1).map(([id]) => id));
+  const mark = (n: BomNode) => {
+    if (n.type === "part" && dupSet.has(n.refId)) n.isDuplicate = true;
+    n.children?.forEach(mark);
+  };
+  mark(root);
+}
+
+function buildTree(detail: ApiBomDetail, project: Product | undefined): BomNode {
+  const nodeById = new Map<string, BomNode>();
+  for (const line of detail.lines) nodeById.set(line.id, lineToNode(line));
+
+  const topLevel: BomNode[] = [];
+  for (const line of detail.lines) {
+    const node = nodeById.get(line.id)!;
+    const parent = line.parent_line_id ? nodeById.get(line.parent_line_id) : undefined;
+    if (parent) {
+      (parent.children ??= []).push(node);
+    } else {
+      topLevel.push(node);
+    }
+  }
+
+  const rolled = Math.round(topLevel.reduce((s, c) => s + c.extendedCost, 0) * 100) / 100;
+  const root: BomNode = {
+    id: "root",
+    refId: detail.project_id,
+    type: "project",
+    partNumber: project?.code ?? detail.number,
+    name: project?.name ?? detail.number,
+    quantity: 1,
+    uom: "ea",
+    unitCost: rolled,
+    extendedCost: rolled,
+    lifecycle: project?.lifecycle ?? "Released",
+    revision: detail.revision,
+    leadTimeDays: 0,
+    procurement: "Make",
+    level: 0,
+    findNumber: 0,
+    children: topLevel,
+    hasIssue: false,
+    isDuplicate: false,
+  };
+  markDuplicates(root);
+  return root;
+}
+
+function ProjectPicker({ onSelect }: { onSelect: (id: string) => void }) {
+  const projectsQuery = useProjects();
+  const projectsAll = projectsQuery.data?.items ?? [];
+  const [query, setQuery] = React.useState("");
+
+  const projects = React.useMemo(() => {
+    const t = query.trim().toLowerCase();
+    if (!t) return projectsAll;
+    return projectsAll.filter(
+      (p) =>
+        p.name.toLowerCase().includes(t) ||
+        p.code.toLowerCase().includes(t) ||
+        p.customer.toLowerCase().includes(t),
+    );
+  }, [projectsAll, query]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface/40 px-6 py-4">
+        <div>
+          <h2 className="text-[15px] font-semibold">Select a project</h2>
+          <p className="text-2xs text-muted-foreground">
+            Choose a project to open its bill of materials
+          </p>
+        </div>
+        <div className="relative ml-auto w-64">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search projects…"
+            className="h-9 pl-8"
+          />
+        </div>
+      </div>
+
+      <QueryBoundary
+        className="min-h-0 flex-1"
+        isLoading={projectsQuery.isLoading}
+        isError={projectsQuery.isError}
+        error={projectsQuery.error}
+        onRetry={() => projectsQuery.refetch()}
+      >
+        <div className="min-h-0 flex-1 overflow-auto p-6">
+          {projects.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No projects match “{query}”.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="group flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 text-left transition-all hover:border-primary/50 hover:bg-accent/40 hover:shadow-sm"
+                >
+                  <div className="flex items-start gap-3">
+                    <Thumbnail hue={p.thumbnailHue} size={40} icon={Boxes} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold group-hover:text-primary">
+                        {p.name}
+                      </p>
+                      <p className="font-mono text-2xs text-muted-foreground">{p.code}</p>
+                    </div>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant={PROJECT_STAGE_VARIANT[p.stage]}>{p.stage}</Badge>
+                    <Badge variant="outline">Rev {p.revision}</Badge>
+                  </div>
+                  <p className="truncate text-2xs text-muted-foreground">{p.customer}</p>
+                  <div className="mt-auto flex items-center justify-between border-t border-border/60 pt-3">
+                    <span className="text-2xs text-muted-foreground">{p.customer}</span>
+                    <span className="text-[13px] font-semibold tabular text-primary">
+                      {formatCurrency(p.targetCost || p.unitCost)}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </QueryBoundary>
+    </div>
+  );
+}
+
+function BomView({
+  rootId,
+  onSelect,
+  onBack,
+}: {
+  rootId: string;
+  onSelect: (id: string) => void;
+  onBack: () => void;
+}) {
+  const projectsQuery = useProjects();
+  const projects = projectsQuery.data?.items ?? [];
+  const project = projects.find((p) => p.id === rootId);
+
+  const bomsQuery = useBoms({ projectId: rootId });
+  const projectBoms = bomsQuery.data?.items ?? [];
+
+  const [bomId, setBomId] = React.useState<string | null>(null);
+  // Auto-select the (first / only) BOM document once the list resolves.
+  React.useEffect(() => {
+    if (!bomId && projectBoms.length > 0) setBomId(projectBoms[0].id);
+  }, [bomId, projectBoms]);
+
+  const bomQuery = useBom(bomId ?? "");
+
+  return (
+    <QueryBoundary
+      isLoading={bomsQuery.isLoading}
+      isError={bomsQuery.isError}
+      error={bomsQuery.error}
+      onRetry={() => bomsQuery.refetch()}
+    >
+      {projectBoms.length === 0 ? (
+        <div className="flex h-full flex-col">
+          <div className="flex items-center gap-2 border-b border-border bg-surface/40 px-4 py-2.5">
+            <Button variant="ghost" size="icon-sm" onClick={onBack} title="Back to projects">
+              <ArrowLeft className="size-4" />
+            </Button>
+            <span className="text-[13px] font-medium">{project?.name ?? "Project"}</span>
+          </div>
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            This project has no BOM documents yet.
+          </div>
+        </div>
+      ) : (
+        <QueryBoundary
+          isLoading={!!bomId && bomQuery.isLoading}
+          isError={bomQuery.isError}
+          error={bomQuery.error}
+          onRetry={() => bomQuery.refetch()}
+        >
+          {bomQuery.data ? (
+            <BomDocumentView
+              key={bomId}
+              detail={bomQuery.data}
+              project={project}
+              projects={projects}
+              projectBoms={projectBoms}
+              activeBomId={bomId!}
+              onSelectBom={setBomId}
+              onSelectProject={(id) => { setBomId(null); onSelect(id); }}
+              onBack={onBack}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading BOM…</div>
+          )}
+        </QueryBoundary>
+      )}
+    </QueryBoundary>
+  );
+}
+
+function BomDocumentView({
+  detail,
+  project,
+  projects,
+  projectBoms,
+  activeBomId,
+  onSelectBom,
+  onSelectProject,
+  onBack,
+}: {
+  detail: ApiBomDetail;
+  project: Product | undefined;
+  projects: Product[];
+  projectBoms: { id: string; number: string; revision: string; bomType: string }[];
+  activeBomId: string;
+  onSelectBom: (id: string) => void;
+  onSelectProject: (id: string) => void;
+  onBack: () => void;
+}) {
   const router = useRouter();
   const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
-  const [rootIdx, setRootIdx] = React.useState(0);
-  const root = ROOTS[rootIdx]!;
-  // bumped whenever a BOM line is added so the memoized tree rebuilds
-  const [version, setVersion] = React.useState(0);
-  const tree = React.useMemo(() => buildProjectBom(root.id), [root.id, version]);
+  const addBomLine = useAddBomLine();
+  const updateBomLine = useUpdateBomLine();
+
+  const tree = React.useMemo(() => buildTree(detail, project), [detail, project]);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(["root"]));
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [query, setQuery] = React.useState("");
   const [activeNode, setActiveNode] = React.useState<BomNode | null>(null);
 
-  // reset when root changes
-  React.useEffect(() => {
-    setExpanded(new Set(["root"]));
-    setSelected(new Set());
-    setActiveNode(null);
-  }, [root.id]);
+  const analysisQuery = useBomAnalysis(activeBomId, "category");
+
+  const rootName = project?.name ?? detail.number;
 
   const allIds = React.useMemo(() => {
     const ids: string[] = [];
@@ -88,12 +378,11 @@ export function BomExplorer() {
       if (n.children?.length) ids.push(n.id);
       n.children?.forEach(walk);
     };
-    if (tree) walk(tree);
+    walk(tree);
     return ids;
   }, [tree]);
 
   const flat = React.useMemo(() => {
-    if (!tree) return [];
     let rows = flattenBom(tree, expanded);
     if (query.trim()) {
       const t = query.toLowerCase();
@@ -105,25 +394,13 @@ export function BomExplorer() {
   }, [tree, expanded, query]);
 
   const stats = React.useMemo(() => {
-    if (!tree) return null;
     const all = flattenBom(tree, new Set(allIds));
     const parts = all.filter((n) => n.type === "part");
     const unique = new Set(parts.map((p) => p.refId));
     const dups = parts.filter((p) => p.isDuplicate);
     const issues = all.filter((n) => n.hasIssue);
-    const maxDepth = Math.max(...all.map((n) => n.level));
+    const maxDepth = Math.max(...all.map((n) => n.level), 0);
     const maxLead = Math.max(...parts.map((p) => p.leadTimeDays), 0);
-    // cost by category
-    const byCat = new Map<string, number>();
-    parts.forEach((p) => byCat.set(p.category ?? "Other", (byCat.get(p.category ?? "Other") ?? 0) + p.extendedCost));
-    const catData = [...byCat.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([name, value], i) => ({
-        name,
-        value: Math.round(value),
-        color: `hsl(${(i * 47 + 168) % 360} 60% 50%)`,
-      }));
     return {
       totalParts: parts.reduce((s, p) => s + p.quantity, 0),
       uniqueParts: unique.size,
@@ -133,9 +410,23 @@ export function BomExplorer() {
       maxLead,
       dups: new Set(dups.map((d) => d.refId)).size,
       issues: issues.length,
-      catData,
     };
   }, [tree, allIds]);
+
+  // Cost-by-category donut is sourced from the server analysis endpoint.
+  const catData = React.useMemo(() => {
+    const groups = analysisQuery.data?.groups ?? [];
+    return groups
+      .slice()
+      .sort((a, b) => toNumber(b.totalValue) - toNumber(a.totalValue))
+      .slice(0, 6)
+      .map((g, i) => ({
+        name: g.key || "Other",
+        value: Math.round(toNumber(g.totalValue)),
+        color: `hsl(${(i * 47 + 168) % 360} 60% 50%)`,
+      }));
+  }, [analysisQuery.data]);
+  const analysisTotal = analysisQuery.data ? toNumber(analysisQuery.data.total) : stats.totalCost;
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -152,7 +443,7 @@ export function BomExplorer() {
     });
 
   const exportBom = () => {
-    const rows = flattenBom(tree!, new Set(allIds)).filter((n) => n.id !== "root");
+    const rows = flattenBom(tree, new Set(allIds)).filter((n) => n.id !== "root");
     downloadCsv(
       rows,
       [
@@ -167,47 +458,41 @@ export function BomExplorer() {
         { header: "Procurement", value: (n) => n.procurement ?? "" },
         { header: "Lifecycle", value: (n) => n.lifecycle ?? "" },
       ],
-      `bom-${root.projectNumber ?? root.id}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `bom-${detail.number ?? detail.id}-${new Date().toISOString().slice(0, 10)}.csv`,
     );
     toast.success("BOM exported", `${rows.length} lines downloaded as CSV`);
   };
 
   const showWhereUsed = (node: BomNode) => {
-    const uses = whereUsed(node.refId);
-    toast.info(
-      "Where used",
-      uses.length
-        ? `${node.partNumber} is used in ${uses.length} project BOM(s)`
-        : `${node.partNumber} is not referenced in any other BOM`,
-    );
+    // where-used across other BOMs isn't exposed by a single client call; the
+    // per-part usage count is available on the mapped part list instead.
+    toast.info("Where used", `${node.partNumber} — open the Material Master to see full usage.`);
   };
 
-  // Map currently-selected node ids → their underlying part refIds.
-  const selectedRefIds = () => {
-    const byId = new Map(flattenBom(tree!, new Set(allIds)).map((n) => [n.id, n.refId]));
-    return new Set([...selected].map((id) => byId.get(id)).filter(Boolean) as string[]);
-  };
-
-  const massEditQty = () => {
-    const refIds = selectedRefIds();
-    const input = window.prompt(`Set quantity for ${selected.size} selected line(s):`, "1");
+  // Set the same quantity on every selected BOM line via the API.
+  const massEditQty = async () => {
+    const lineIds = [...selected].filter((id) => id !== "root");
+    if (lineIds.length === 0) return;
+    const input = window.prompt(`Set quantity for ${lineIds.length} selected line(s):`, "1");
     if (input == null) return;
     const qty = Math.max(0, Math.round(Number(input)));
     if (!Number.isFinite(qty)) {
       toast.error("Invalid quantity", "Enter a whole number");
       return;
     }
-    const edges = db().projectBomLines[root.id] ?? [];
-    let changed = 0;
-    edges.forEach((e) => {
-      if (refIds.has(e.refId)) { e.qty = qty; changed++; }
-    });
-    setVersion((v) => v + 1);
-    setSelected(new Set());
-    toast.success("Quantities updated", `${changed} BOM line(s) set to qty ${qty}`);
+    try {
+      await Promise.all(lineIds.map((lineId) => updateBomLine.mutateAsync({ lineId, body: { quantity: qty } })));
+      setSelected(new Set());
+      toast.success("Quantities updated", `${lineIds.length} BOM line(s) set to qty ${qty}`);
+    } catch (e) {
+      toast.error("Update failed", e instanceof Error ? e.message : "Could not update line quantities");
+    }
   };
 
-  if (!tree || !stats) return null;
+  const existingRefIds = React.useMemo(
+    () => new Set((tree.children ?? []).map((c) => c.refId)),
+    [tree],
+  );
 
   return (
     <div className="flex h-full min-h-0">
@@ -215,34 +500,62 @@ export function BomExplorer() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface/40 px-4 py-2.5">
+          <Button variant="ghost" size="icon-sm" onClick={onBack} title="Back to projects">
+            <ArrowLeft className="size-4" />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2">
                 <Boxes className="size-4 text-primary" />
-                <span className="max-w-[220px] truncate">{root.name}</span>
+                <span className="max-w-[220px] truncate">{rootName}</span>
                 <ChevronRight className="size-3.5 rotate-90 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="max-h-80 w-72 overflow-y-auto">
-              <DropdownMenuLabel>Project BOMs</DropdownMenuLabel>
-              {ROOTS.map((r, i) => (
-                <DropdownMenuItem key={r.id} onClick={() => setRootIdx(i)}>
+              <DropdownMenuLabel>Projects</DropdownMenuLabel>
+              {projects.map((r) => (
+                <DropdownMenuItem key={r.id} onClick={() => onSelectProject(r.id)}>
                   <Thumbnail hue={r.thumbnailHue} size={26} icon={Boxes} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px] font-medium">{r.name}</p>
                     <p className="font-mono text-2xs text-muted-foreground">{r.code}</p>
                   </div>
-                  {i === rootIdx && <Badge variant="default">current</Badge>}
+                  {r.id === detail.project_id && <Badge variant="default">current</Badge>}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* BOM document picker — only when the project has several */}
+          {projectBoms.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Network className="size-4 text-primary" />
+                  <span className="max-w-[160px] truncate font-mono">{detail.number}</span>
+                  <ChevronRight className="size-3.5 rotate-90 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
+                <DropdownMenuLabel>BOM documents</DropdownMenuLabel>
+                {projectBoms.map((b) => (
+                  <DropdownMenuItem key={b.id} onClick={() => onSelectBom(b.id)}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-[13px] font-medium">{b.number}</p>
+                      <p className="text-2xs text-muted-foreground">{b.bomType} · Rev {b.revision}</p>
+                    </div>
+                    {b.id === activeBomId && <Badge variant="default">current</Badge>}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           <div className="flex items-center gap-1 text-2xs text-muted-foreground">
-            <span>{root.customer}</span>
+            <span>{project?.customer ?? ""}</span>
             <ChevronRight className="size-3" />
-            <span className="font-mono">{root.code}</span>
-            <Badge variant="outline" className="ml-1">Rev {root.revision}</Badge>
+            <span className="font-mono">{project?.code ?? detail.number}</span>
+            <Badge variant="outline" className="ml-1">Rev {detail.revision}</Badge>
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
@@ -272,7 +585,7 @@ export function BomExplorer() {
             ["Max Depth", `${stats.maxDepth} lvl`, null],
             ["Max Lead", `${stats.maxLead} d`, stats.maxLead > 45 ? "text-warning" : null],
             ["Duplicates", String(stats.dups), stats.dups ? "text-warning" : null],
-            ["Issues", String(stats.issues), stats.issues ? "text-destructive" : null],
+            ["Critical", String(stats.issues), stats.issues ? "text-destructive" : null],
           ].map(([label, value, tone]) => (
             <div key={label as string} className="flex min-w-[110px] flex-col px-4 py-2">
               <span className="text-2xs text-muted-foreground">{label}</span>
@@ -388,14 +701,14 @@ export function BomExplorer() {
         </div>
         <div className="p-4">
           <div className="relative">
-            <DonutChart data={stats.catData} height={180} />
+            <DonutChart data={catData} height={180} />
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-2xs text-muted-foreground">Total</span>
-              <span className="text-base font-semibold tabular">{formatCurrency(stats.totalCost)}</span>
+              <span className="text-base font-semibold tabular">{formatCurrency(analysisTotal)}</span>
             </div>
           </div>
           <div className="mt-3 space-y-1.5">
-            {stats.catData.map((c) => (
+            {catData.map((c) => (
               <div key={c.name} className="flex items-center gap-2 text-2xs">
                 <span className="size-2 rounded-full" style={{ background: c.color }} />
                 <span className="flex-1 truncate text-muted-foreground">{c.name}</span>
@@ -420,7 +733,7 @@ export function BomExplorer() {
                 ["Qty", `${activeNode.quantity} ${activeNode.uom}`],
                 ["Unit", formatCurrency(activeNode.unitCost)],
                 ["Extended", formatCurrency(activeNode.extendedCost)],
-                ["% of BOM", `${((activeNode.extendedCost / stats.totalCost) * 100).toFixed(1)}%`],
+                ["% of BOM", `${stats.totalCost ? ((activeNode.extendedCost / stats.totalCost) * 100).toFixed(1) : "0.0"}%`],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-lg border border-border bg-surface p-2">
                   <p className="text-muted-foreground">{k}</p>
@@ -433,25 +746,25 @@ export function BomExplorer() {
       </div>
 
       <AddComponentDialog
-        projectId={root.id}
-        projectName={root.name}
-        existingRefIds={new Set((tree.children ?? []).map((c) => c.refId))}
-        onAdded={() => setVersion((v) => v + 1)}
+        bomId={activeBomId}
+        projectName={rootName}
+        existingRefIds={existingRefIds}
+        addBomLine={addBomLine}
       />
     </div>
   );
 }
 
 function AddComponentDialog({
-  projectId,
+  bomId,
   projectName,
   existingRefIds,
-  onAdded,
+  addBomLine,
 }: {
-  projectId: string;
+  bomId: string;
   projectName: string;
   existingRefIds: Set<string>;
-  onAdded: () => void;
+  addBomLine: ReturnType<typeof useAddBomLine>;
 }) {
   const open = useUIStore((s) => s.bomAddComponentOpen);
   const setOpen = useUIStore((s) => s.setBomAddComponentOpen);
@@ -471,29 +784,29 @@ function AddComponentDialog({
     }
   }, [open]);
 
-  const parts = db().parts;
-  const matches = React.useMemo(() => {
-    const t = query.trim().toLowerCase();
-    const list = t
-      ? parts.filter((p) => p.name.toLowerCase().includes(t) || p.partNumber.toLowerCase().includes(t))
-      : parts;
-    return list.slice(0, 50);
-  }, [parts, query]);
+  const partsQuery = useParts(query.trim() ? { search: query.trim(), limit: 50 } : { limit: 50 });
+  const matches = partsQuery.data?.items ?? [];
 
-  const selectedPart = partId ? parts.find((p) => p.id === partId) ?? null : null;
+  const selectedPart = partId ? matches.find((p) => p.id === partId) ?? null : null;
   const qtyNum = Number(qty);
-  const canAdd = !!selectedPart && Number.isFinite(qtyNum) && qtyNum > 0;
+  const canAdd = !!selectedPart && Number.isFinite(qtyNum) && qtyNum > 0 && !addBomLine.isPending;
 
-  const submit = () => {
-    if (!canAdd || !selectedPart) return;
-    addProjectBomLine(projectId, {
-      refId: selectedPart.id,
-      qty: qtyNum,
-      refDes: refDes.trim() || undefined,
-    });
-    toast.success("Component added", `${selectedPart.name} ×${qtyNum} → ${projectName}`);
-    onAdded();
-    setOpen(false);
+  const submit = async () => {
+    if (!selectedPart || !Number.isFinite(qtyNum) || qtyNum <= 0) return;
+    try {
+      await addBomLine.mutateAsync({
+        bomId,
+        body: {
+          part_id: selectedPart.id,
+          quantity: qtyNum,
+          ref_designator: refDes.trim() || undefined,
+        },
+      });
+      toast.success("Component added", `${selectedPart.name} ×${qtyNum} → ${projectName}`);
+      setOpen(false);
+    } catch (e) {
+      toast.error("Add failed", e instanceof Error ? e.message : "Could not add component");
+    }
   };
 
   return (
@@ -517,7 +830,9 @@ function AddComponentDialog({
           </div>
 
           <div className="max-h-56 overflow-y-auto rounded-lg border border-border">
-            {matches.length === 0 ? (
+            {partsQuery.isLoading ? (
+              <div className="px-3 py-6 text-center text-2xs text-muted-foreground">Loading parts…</div>
+            ) : matches.length === 0 ? (
               <div className="px-3 py-6 text-center text-2xs text-muted-foreground">No matching parts</div>
             ) : (
               matches.map((p) => {
@@ -567,7 +882,7 @@ function AddComponentDialog({
             </label>
           </div>
 
-          {selectedPart && canAdd && (
+          {selectedPart && Number.isFinite(qtyNum) && qtyNum > 0 && (
             <div className="flex items-center justify-between rounded-lg border border-border bg-surface-sunken/40 px-3 py-2 text-2xs">
               <span className="text-muted-foreground">Extended cost</span>
               <span className="font-semibold tabular">{formatCurrency(selectedPart.unitCost * qtyNum)}</span>

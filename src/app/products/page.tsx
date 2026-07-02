@@ -5,17 +5,18 @@ import { FolderKanban, Plus, FileText } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { ProductsView } from "@/features/products/products-view";
-import { db } from "@/mock/db";
+import { useProjects } from "@/lib/api";
 import { useUIStore } from "@/stores/ui-store";
 
 export default function ProjectsPage() {
-  const projects = db().products;
+  const projectsQuery = useProjects();
+  const count = projectsQuery.data?.meta?.total ?? projectsQuery.data?.items.length ?? 0;
   const setCreateProductOpen = useUIStore((s) => s.setCreateProductOpen);
   return (
     <div className="flex h-full flex-col">
       <PageHeader
         title="Projects"
-        description={`${projects.length} projects · enquiry to delivery`}
+        description={`${count} projects · enquiry to delivery`}
         icon={FolderKanban}
         actions={
           <>

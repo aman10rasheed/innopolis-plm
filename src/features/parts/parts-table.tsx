@@ -32,9 +32,8 @@ import {
   Check,
   Filter,
 } from "lucide-react";
-import { partColumns } from "./columns";
+import { makePartColumns } from "./columns";
 import type { Part } from "@/types";
-import { db } from "@/mock/db";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +66,9 @@ import { PartDetailDrawer } from "./part-detail-drawer";
 import { CreatePartDialog } from "./create-part-dialog";
 import { EditPartDialog } from "./edit-part-dialog";
 import { downloadCsv, copyToClipboard } from "@/lib/export";
-import { getSupplier } from "@/mock/db";
 import { useUIStore } from "@/stores/ui-store";
-
-const CATEGORIES = [...new Set(db().parts.map((p) => p.category))];
-const LIFECYCLES = [...new Set(db().parts.map((p) => p.lifecycle))];
-const AVAILABILITIES = [...new Set(db().parts.map((p) => p.availability))];
+import { QueryBoundary } from "@/components/shared/query-boundary";
+import { useParts, useVendors, useDeletePart, useUpdatePart } from "@/lib/api";
 
 function FacetFilter({
   label,
@@ -141,16 +137,33 @@ function FacetFilter({
 
 export function PartsTable() {
   const { createPartOpen, setCreatePartOpen } = useUIStore();
-  const dataRev = useUIStore((s) => s.dataRev);
-  const [extraParts, setExtraParts] = React.useState<Part[]>([]);
+
+  // Data source: the real API (no offline mock fallback — a dropped backend
+  // surfaces the QueryBoundary network-issue state instead).
+  const partsQuery = useParts();
+  const vendorsQuery = useVendors();
+  const deletePart = useDeletePart();
+  const updatePart = useUpdatePart();
+
+  const data = React.useMemo(() => partsQuery.data?.items ?? [], [partsQuery.data]);
+  const vendors = vendorsQuery.data?.items ?? [];
+
+  // Vendor-name lookup replaces the mock `getSupplier` selector.
+  const supplierMap = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of vendors) m.set(v.id, v.name);
+    return m;
+  }, [vendors]);
+  const supplierName = React.useCallback((id: string) => supplierMap.get(id) ?? "", [supplierMap]);
+
+  const columns = React.useMemo(() => makePartColumns(supplierName), [supplierName]);
+
+  // Facet options derived from the loaded data.
+  const CATEGORIES = React.useMemo(() => [...new Set(data.map((p) => p.category))], [data]);
+  const LIFECYCLES = React.useMemo(() => [...new Set(data.map((p) => p.lifecycle))], [data]);
+  const AVAILABILITIES = React.useMemo(() => [...new Set(data.map((p) => p.availability))], [data]);
+
   const [editPart, setEditPart] = React.useState<Part | null>(null);
-  const [archivedIds, setArchivedIds] = React.useState<Set<string>>(() => new Set());
-  // Bumped after editing a seeded part (mutated in place) to force the memo to recompute.
-  const [rev, setRev] = React.useState(0);
-  const data = React.useMemo(
-    () => [...extraParts, ...db().parts].filter((p) => !archivedIds.has(p.id)),
-    [extraParts, rev, archivedIds, dataRev],
-  );
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -172,8 +185,9 @@ export function PartsTable() {
 
   const table = useReactTable({
     data,
-    columns: partColumns,
+    columns,
     state: { sorting, columnFilters, columnVisibility, rowSelection, globalFilter, grouping },
+    getRowId: (row) => row.id,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
@@ -235,7 +249,7 @@ export function PartsTable() {
         { header: "Sourcing", value: (p) => p.sourcing },
         { header: "Unit Cost", value: (p) => p.unitCost },
         { header: "Lead Time (days)", value: (p) => p.leadTimeDays },
-        { header: "Vendor", value: (p) => getSupplier(p.supplierId)?.name ?? "" },
+        { header: "Vendor", value: (p) => supplierName(p.supplierId) },
         { header: "Stock Qty", value: (p) => p.stockQty },
         { header: "UoM", value: (p) => p.uom },
       ],
@@ -248,54 +262,38 @@ export function PartsTable() {
 
   const selectedParts = () => table.getSelectedRowModel().rows.map((r) => r.original);
 
+  // Duplicating requires the master IDs (category/subtype/spec/grade) that the
+  // create endpoint needs to generate a part number — those are not carried on
+  // the mapped Part shape, so we open the create dialog seeded with a suggested
+  // name instead of blindly POSTing an invalid body.
   const duplicatePart = (part: Part) => {
-    const clone: Part = {
-      ...part,
-      id: `P-dup-${Date.now()}`,
-      partNumber: `${part.partNumber}-COPY`,
-      name: `${part.name} (copy)`,
-      lifecycle: "In Design",
-      revision: "A",
-      stockQty: 0,
-      whereUsedCount: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setExtraParts((prev) => [clone, ...prev]);
-    if (parentRef.current) parentRef.current.scrollTo({ top: 0 });
-    toast.success("Duplicated", `${part.partNumber} cloned as ${clone.partNumber}`);
+    copyToClipboard(part.partNumber);
+    setCreatePartOpen(true);
+    toast.info("Duplicate as new material", `Copied ${part.partNumber} — pick its type to generate a new code`);
   };
 
   const archivePart = (part: Part) => {
-    setArchivedIds((prev) => new Set(prev).add(part.id));
-    setRowSelection({});
-    toast({
-      title: "Archived",
-      description: `${part.partNumber} removed from the active master`,
-      variant: "success",
-      action: {
-        label: "Undo",
-        onClick: () =>
-          setArchivedIds((prev) => {
-            const next = new Set(prev);
-            next.delete(part.id);
-            return next;
-          }),
+    deletePart.mutate(part.id, {
+      onSuccess: () => {
+        setRowSelection({});
+        toast.success("Archived", `${part.partNumber} removed from the active master`);
       },
+      onError: (e) => toast.error("Could not archive material", e instanceof Error ? e.message : undefined),
     });
   };
 
-  const promoteSelected = () => {
+  const promoteSelected = async () => {
     const sel = selectedParts();
-    const ids = new Set(sel.map((p) => p.id));
-    setExtraParts((prev) => prev.map((p) => (ids.has(p.id) ? { ...p, lifecycle: "Released" as const } : p)));
-    // Seeded parts are mutated in place; bump rev to re-render.
-    sel.forEach((p) => {
-      if (!extraParts.some((e) => e.id === p.id)) p.lifecycle = "Released";
-    });
-    setRev((r) => r + 1);
-    setRowSelection({});
-    toast.success("Lifecycle promoted", `${sel.length} part(s) moved to Released`);
+    if (!sel.length) return;
+    try {
+      await Promise.all(
+        sel.map((p) => updatePart.mutateAsync({ id: p.id, body: { lifecycle: "Released" } })),
+      );
+      setRowSelection({});
+      toast.success("Lifecycle promoted", `${sel.length} part(s) moved to Released`);
+    } catch (e) {
+      toast.error("Could not promote materials", e instanceof Error ? e.message : undefined);
+    }
   };
 
   return (
@@ -392,111 +390,119 @@ export function PartsTable() {
         </div>
       </div>
 
-      {/* Header */}
-      <div ref={headerRef} className="overflow-hidden border-b border-border bg-surface-sunken/40">
-        <div className="flex items-center px-4" style={{ minWidth: TABLE_MIN_WIDTH }}>
-          {table.getHeaderGroups()[0]?.headers.map((header) => (
-            <div
-              key={header.id}
-              style={{ width: header.getSize(), flex: header.column.id === "partNumber" ? "1 0 auto" : "0 0 auto" }}
-              className="flex h-9 items-center px-2 first:pl-0"
-            >
-              {header.isPlaceholder
-                ? null
-                : flexRender(header.column.columnDef.header, header.getContext())}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Body (virtualized) */}
-      <div
-        ref={parentRef}
-        className="flex-1 overflow-auto"
-        onScroll={(e) => {
-          if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
-        }}
+      <QueryBoundary
+        isLoading={partsQuery.isLoading}
+        isError={partsQuery.isError}
+        error={partsQuery.error}
+        onRetry={() => partsQuery.refetch()}
+        className="flex-1"
       >
-        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", minWidth: TABLE_MIN_WIDTH }}>
-          {virtualizer.getVirtualItems().map((vRow) => {
-            const row = rows[vRow.index]!;
-            if (row.getIsGrouped()) {
-              return (
-                <div
-                  key={row.id}
-                  style={{ position: "absolute", top: 0, left: 0, width: "100%", height: rowHeight, transform: `translateY(${vRow.start}px)` }}
-                  className="flex items-center gap-2 border-b border-border bg-surface-sunken/60 px-4 text-[13px] font-semibold"
-                >
-                  <button onClick={row.getToggleExpandedHandler()} className="flex items-center gap-1.5">
-                    <ChevronRight className={cn("size-4 transition-transform", row.getIsExpanded() && "rotate-90")} />
-                    <span className="capitalize">{String(row.groupingValue)}</span>
-                  </button>
-                  <Badge variant="muted">{row.subRows.length}</Badge>
-                </div>
-              );
-            }
-            return (
-              <ContextMenu key={row.id}>
-                <ContextMenuTrigger asChild>
-                  <div
-                    onClick={() => setActivePart(row.original)}
-                    data-selected={row.getIsSelected()}
-                    style={{ position: "absolute", top: 0, left: 0, width: "100%", height: rowHeight, transform: `translateY(${vRow.start}px)` }}
-                    className={cn(
-                      "row-hover flex cursor-pointer items-center border-b border-border/60 px-4 data-[selected=true]:bg-primary/[0.07]",
-                    )}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <div
-                        key={cell.id}
-                        style={{ width: cell.column.getSize(), flex: cell.column.id === "partNumber" ? "1 0 auto" : "0 0 auto" }}
-                        className="truncate px-2 first:pl-0"
-                      >
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </div>
-                    ))}
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent className="w-52">
-                  <ContextMenuItem onClick={() => setActivePart(row.original)}>
-                    <Eye /> Open details
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => setEditPart(row.original)}>
-                    <Pencil /> Edit material
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => setActivePart(row.original)}>
-                    <Network /> Where used
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => duplicatePart(row.original)}>
-                    <Copy /> Duplicate
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => { copyToClipboard(row.original.partNumber); toast.success("Copied", row.original.partNumber); }}>
-                    <GitCompare /> Copy part number
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem destructive onClick={() => archivePart(row.original)}>
-                    <Trash2 /> Archive
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            );
-          })}
+        {/* Header */}
+        <div ref={headerRef} className="overflow-hidden border-b border-border bg-surface-sunken/40">
+          <div className="flex items-center px-4" style={{ minWidth: TABLE_MIN_WIDTH }}>
+            {table.getHeaderGroups()[0]?.headers.map((header) => (
+              <div
+                key={header.id}
+                style={{ width: header.getSize(), flex: header.column.id === "partNumber" ? "1 0 auto" : "0 0 auto" }}
+                className="flex h-9 items-center px-2 first:pl-0"
+              >
+                {header.isPlaceholder
+                  ? null
+                  : flexRender(header.column.columnDef.header, header.getContext())}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between border-t border-border bg-surface/40 px-4 py-2 text-2xs text-muted-foreground">
-        <span>
-          {table.getFilteredRowModel().rows.length.toLocaleString()} of {data.length.toLocaleString()} materials
-          {activeFilterCount > 0 && ` · ${activeFilterCount} filters`}
-        </span>
-        <span>
-          Total cost basis:{" "}
-          <span className="font-medium text-foreground tabular">
-            ${table.getFilteredRowModel().rows.reduce((s, r) => s + r.original.unitCost, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        {/* Body (virtualized) */}
+        <div
+          ref={parentRef}
+          className="flex-1 overflow-auto"
+          onScroll={(e) => {
+            if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+          }}
+        >
+          <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", minWidth: TABLE_MIN_WIDTH }}>
+            {virtualizer.getVirtualItems().map((vRow) => {
+              const row = rows[vRow.index]!;
+              if (row.getIsGrouped()) {
+                return (
+                  <div
+                    key={row.id}
+                    style={{ position: "absolute", top: 0, left: 0, width: "100%", height: rowHeight, transform: `translateY(${vRow.start}px)` }}
+                    className="flex items-center gap-2 border-b border-border bg-surface-sunken/60 px-4 text-[13px] font-semibold"
+                  >
+                    <button onClick={row.getToggleExpandedHandler()} className="flex items-center gap-1.5">
+                      <ChevronRight className={cn("size-4 transition-transform", row.getIsExpanded() && "rotate-90")} />
+                      <span className="capitalize">{String(row.groupingValue)}</span>
+                    </button>
+                    <Badge variant="muted">{row.subRows.length}</Badge>
+                  </div>
+                );
+              }
+              return (
+                <ContextMenu key={row.id}>
+                  <ContextMenuTrigger asChild>
+                    <div
+                      onClick={() => setActivePart(row.original)}
+                      data-selected={row.getIsSelected()}
+                      style={{ position: "absolute", top: 0, left: 0, width: "100%", height: rowHeight, transform: `translateY(${vRow.start}px)` }}
+                      className={cn(
+                        "row-hover flex cursor-pointer items-center border-b border-border/60 px-4 data-[selected=true]:bg-primary/[0.07]",
+                      )}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <div
+                          key={cell.id}
+                          style={{ width: cell.column.getSize(), flex: cell.column.id === "partNumber" ? "1 0 auto" : "0 0 auto" }}
+                          className="truncate px-2 first:pl-0"
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </div>
+                      ))}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-52">
+                    <ContextMenuItem onClick={() => setActivePart(row.original)}>
+                      <Eye /> Open details
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => setEditPart(row.original)}>
+                      <Pencil /> Edit material
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => setActivePart(row.original)}>
+                      <Network /> Where used
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => duplicatePart(row.original)}>
+                      <Copy /> Duplicate
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => { copyToClipboard(row.original.partNumber); toast.success("Copied", row.original.partNumber); }}>
+                      <GitCompare /> Copy part number
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem destructive onClick={() => archivePart(row.original)}>
+                      <Trash2 /> Archive
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-border bg-surface/40 px-4 py-2 text-2xs text-muted-foreground">
+          <span>
+            {table.getFilteredRowModel().rows.length.toLocaleString()} of {data.length.toLocaleString()} materials
+            {activeFilterCount > 0 && ` · ${activeFilterCount} filters`}
           </span>
-        </span>
-      </div>
+          <span>
+            Total cost basis:{" "}
+            <span className="font-medium text-foreground tabular">
+              ${table.getFilteredRowModel().rows.reduce((s, r) => s + r.original.unitCost, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </span>
+          </span>
+        </div>
+      </QueryBoundary>
 
       {/* Bulk action bar */}
       {selectedCount > 0 && (
@@ -510,7 +516,7 @@ export function PartsTable() {
             <Button size="xs" variant="ghost" onClick={() => exportRows(selectedParts(), "selection")}>
               <Download className="size-3.5" /> Export
             </Button>
-            <Button size="xs" variant="ghost" onClick={promoteSelected}>
+            <Button size="xs" variant="ghost" disabled={updatePart.isPending} onClick={promoteSelected}>
               <Check className="size-3.5" /> Promote
             </Button>
             <div className="h-5 w-px bg-border" />
@@ -523,6 +529,7 @@ export function PartsTable() {
 
       <PartDetailDrawer
         part={activePart}
+        supplierName={supplierName}
         onClose={() => setActivePart(null)}
         onEdit={(part) => {
           setActivePart(null);
@@ -533,26 +540,16 @@ export function PartsTable() {
       <CreatePartDialog
         open={createPartOpen}
         onOpenChange={setCreatePartOpen}
-        onCreate={(part) => {
-          setExtraParts((prev) => [part, ...prev]);
+        vendors={vendors}
+        onCreated={() => {
           if (parentRef.current) parentRef.current.scrollTo({ top: 0 });
         }}
       />
 
       <EditPartDialog
         part={editPart}
+        vendors={vendors}
         onOpenChange={(open) => !open && setEditPart(null)}
-        onSave={(patch) => {
-          if (!editPart) return;
-          const inExtra = extraParts.some((p) => p.id === editPart.id);
-          if (inExtra) {
-            setExtraParts((prev) => prev.map((p) => (p.id === editPart.id ? { ...p, ...patch } : p)));
-          } else {
-            // Seeded parts live in the mock db array — patch in place, then force a re-render.
-            Object.assign(editPart, patch);
-            setRev((r) => r + 1);
-          }
-        }}
       />
     </div>
   );

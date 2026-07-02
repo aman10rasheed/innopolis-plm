@@ -3,16 +3,17 @@
 import { ShoppingCart } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ProcurementView } from "@/features/procurement/procurement-view";
-import { db } from "@/mock/db";
+import { useRfqs, usePurchaseOrders } from "@/lib/api";
 
 export default function ProcurementPage() {
-  const d = db();
+  const rfqCount = useRfqs().data?.meta.total ?? 0;
+  const poCount = usePurchaseOrders().data?.meta.total ?? 0;
 
   return (
     <div className="flex h-full flex-col">
       <PageHeader
         title="Procurement"
-        description={`${d.rfqs.length} RFQs · ${d.quotations.length} quotations · ${d.purchaseOrders.length} purchase orders`}
+        description={`${rfqCount} RFQs · ${poCount} purchase orders`}
         icon={ShoppingCart}
       />
       <div className="min-h-0 flex-1 overflow-hidden">

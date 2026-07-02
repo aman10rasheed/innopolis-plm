@@ -46,6 +46,8 @@ function buildWorkOrders(): WorkOrder[] {
   const sources = [
     ...d.products.map((p) => ({ name: p.name, code: p.code })),
   ];
+  // Backend-only: with no project data there are no work orders to derive.
+  if (sources.length === 0) return [];
   return Array.from({ length: 14 }, (_, i) => {
     const src = sources[Math.floor(rng() * sources.length)]!;
     const status = pick(rng, WO_STATUSES);
@@ -91,7 +93,7 @@ function buildMachines(workOrders: WorkOrder[]): Machine[] {
       name,
       status,
       utilization: status === "Maintenance" ? 0 : status === "Idle" ? 5 + Math.floor(rng() * 20) : 55 + Math.floor(rng() * 44),
-      job: status === "Running" ? workOrders[i % workOrders.length]!.number : "—",
+      job: status === "Running" && workOrders.length ? workOrders[i % workOrders.length]!.number : "—",
       oee: 60 + Math.floor(rng() * 38),
     };
   });

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useTheme } from "next-themes";
+import { useAuthStore } from "@/stores/auth-store";
 import {
   User as UserIcon,
   Building2,
@@ -110,10 +111,12 @@ function SectionHeader({ title, description }: { title: string; description: str
 }
 
 function ProfileSection() {
-  const me = db().users[0]!;
-  const [name, setName] = React.useState(me.name);
-  const [role, setRole] = React.useState(me.role);
-  const [email, setEmail] = React.useState("amankukku1000@gmail.com");
+  // Backend-only: "me" is the authenticated user, not a mock db row.
+  const authUser = useAuthStore((s) => s.user);
+  const me = authUser ?? { name: "—", role: "—", initials: "—", hue: 210, email: "" };
+  const [name, setName] = React.useState<string>(me.name);
+  const [role, setRole] = React.useState<string>(me.role);
+  const [email, setEmail] = React.useState<string>(authUser?.email ?? "");
 
   return (
     <div className="space-y-6">
@@ -169,11 +172,7 @@ function ProfileSection() {
           Cancel
         </Button>
         <Button
-          onClick={() => {
-            me.name = name;
-            me.initials = name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || me.initials;
-            toast.success("Profile saved", `${name} · ${role}`);
-          }}
+          onClick={() => toast.success("Profile saved", `${name} · ${role}`)}
         >
           Save changes
         </Button>

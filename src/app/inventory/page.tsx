@@ -5,12 +5,12 @@ import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { Button } from "@/components/ui/button";
 import { InventoryView } from "@/features/inventory/inventory-view";
-import { db } from "@/mock/db";
+import { useInventory } from "@/lib/api";
 import { useUIStore } from "@/stores/ui-store";
 import { formatCompactCurrency, formatNumber } from "@/lib/utils";
 
 export default function InventoryPage() {
-  const inventory = db().inventory;
+  const inventory = useInventory().data?.items ?? [];
   const stockValue = inventory.reduce((s, r) => s + r.onHand * r.unitCost, 0);
   const skuCount = inventory.length;
   const lowStock = inventory.filter((r) => r.status !== "In Stock").length;

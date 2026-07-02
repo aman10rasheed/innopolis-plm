@@ -3,7 +3,7 @@
  * Mirrors docs/API_GUIDE.md. Returns raw API DTOs; map with `mappers.ts`.
  * ==========================================================================*/
 
-import { req, reqList, type Query } from "./client";
+import { req, reqList, API_BASE, type Query } from "./client";
 import type {
   ApiAuthResponse, ApiUser, ApiUserFull, ApiCreateUserInput, ApiResetPasswordResponse,
   ApiCategory, ApiSubtype, ApiMajorSpec, ApiGrade, ApiUnit,
@@ -42,16 +42,34 @@ export const api = {
   /* ---- Module 1: Material Master masters ---- */
   masters: {
     categories: () => req<ApiCategory[]>("/material-categories"),
+    getCategory: (id: string) => req<ApiCategory>(`/material-categories/${id}`),
     createCategory: (body: Partial<ApiCategory>) => req<ApiCategory>("/material-categories", { method: "POST", body }),
     updateCategory: (id: string, body: Partial<ApiCategory>) => req<ApiCategory>(`/material-categories/${id}`, { method: "PATCH", body }),
     deleteCategory: (id: string) => req<void>(`/material-categories/${id}`, { method: "DELETE" }),
+
     subtypes: (categoryId: string) => req<ApiSubtype[]>(`/material-categories/${categoryId}/subtypes`),
+    getSubtype: (id: string) => req<ApiSubtype>(`/subtypes/${id}`),
     createSubtype: (body: Partial<ApiSubtype>) => req<ApiSubtype>("/subtypes", { method: "POST", body }),
     updateSubtype: (id: string, body: Partial<ApiSubtype>) => req<ApiSubtype>(`/subtypes/${id}`, { method: "PATCH", body }),
     deleteSubtype: (id: string) => req<void>(`/subtypes/${id}`, { method: "DELETE" }),
+
     majorSpecs: () => req<ApiMajorSpec[]>("/major-specs"),
+    getMajorSpec: (id: string) => req<ApiMajorSpec>(`/major-specs/${id}`),
+    createMajorSpec: (body: Partial<ApiMajorSpec>) => req<ApiMajorSpec>("/major-specs", { method: "POST", body }),
+    updateMajorSpec: (id: string, body: Partial<ApiMajorSpec>) => req<ApiMajorSpec>(`/major-specs/${id}`, { method: "PATCH", body }),
+    deleteMajorSpec: (id: string) => req<void>(`/major-specs/${id}`, { method: "DELETE" }),
+
     grades: () => req<ApiGrade[]>("/grades"),
+    getGrade: (id: string) => req<ApiGrade>(`/grades/${id}`),
+    createGrade: (body: Partial<ApiGrade>) => req<ApiGrade>("/grades", { method: "POST", body }),
+    updateGrade: (id: string, body: Partial<ApiGrade>) => req<ApiGrade>(`/grades/${id}`, { method: "PATCH", body }),
+    deleteGrade: (id: string) => req<void>(`/grades/${id}`, { method: "DELETE" }),
+
     units: () => req<ApiUnit[]>("/units"),
+    getUnit: (id: string) => req<ApiUnit>(`/units/${id}`),
+    createUnit: (body: Partial<ApiUnit>) => req<ApiUnit>("/units", { method: "POST", body }),
+    updateUnit: (id: string, body: Partial<ApiUnit>) => req<ApiUnit>(`/units/${id}`, { method: "PATCH", body }),
+    deleteUnit: (id: string) => req<void>(`/units/${id}`, { method: "DELETE" }),
   },
 
   /* ---- Module 1: Materials ---- */
@@ -145,6 +163,13 @@ export const api = {
     opening: (body: Record<string, unknown>) => req<ApiMovement>("/inventory/opening", { method: "POST", body }),
     adjust: (body: Record<string, unknown>) => req<ApiMovement>("/inventory/adjust", { method: "POST", body }),
     transfer: (body: Record<string, unknown>) => req<ApiMovement[]>("/inventory/transfer", { method: "POST", body }),
+  },
+
+  /* ---- Service health (lives outside /api) ---- */
+  health: async (): Promise<{ ok: boolean; status?: string }> => {
+    const res = await fetch(`${API_BASE}/health`);
+    const json = (await res.json().catch(() => null)) as { status?: string } | null;
+    return { ok: res.ok, status: json?.status };
   },
 
   /* ---- Module 6: Reports ---- */

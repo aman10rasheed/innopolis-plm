@@ -65,7 +65,23 @@ export interface ApiResetPasswordResponse {
 }
 
 /* ---- Material Master masters ---- */
-export interface ApiCategory { id: UUID; name: string; type_code: string; default_uom: string; is_active: boolean }
+export interface ApiCategory {
+  id: UUID;
+  name: string;
+  type_code: string;
+  default_uom: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  deleted_at?: string | null;
+}
+/** Create/update payload for a Material Type (Category). `name` + `type_code` required on create. */
+export interface ApiCategoryInput {
+  name: string;
+  type_code: string;
+  default_uom?: string;
+  is_active?: boolean;
+}
 export interface ApiSubtype { id: UUID; category_id: UUID; name: string; code: string; is_active: boolean }
 export interface ApiMajorSpec { id: UUID; code: string; label: string; is_active: boolean }
 export interface ApiGrade { id: UUID; code: string; label: string; is_active: boolean }
