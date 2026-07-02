@@ -12,9 +12,10 @@ import {
   Package,
   Network,
   Download,
-  GitCompare,
   Boxes,
   ArrowLeft,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -54,8 +55,10 @@ import {
   useParts,
   useAddBomLine,
   useUpdateBomLine,
+  useCreateBom,
   toNumber,
 } from "@/lib/api";
+import { ensureCanCreate } from "@/auth/permissions";
 import type { ApiBomDetail, ApiBomLine } from "@/lib/api";
 import type { BomNode, Product } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
@@ -76,6 +79,17 @@ const LEVEL_COLORS = [
 
 export function BomExplorer() {
   const [rootId, setRootId] = React.useState<string | null>(null);
+
+  // The add-component dialog lives inside a BOM document view; on the project
+  // picker the header button has nothing to open — explain instead of no-op.
+  const addComponentOpen = useUIStore((s) => s.bomAddComponentOpen);
+  const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
+  React.useEffect(() => {
+    if (addComponentOpen && rootId == null) {
+      setBomAddComponentOpen(false);
+      toast.info("Open a project first", "Pick a project to add components to its BOM.");
+    }
+  }, [addComponentOpen, rootId, setBomAddComponentOpen]);
 
   if (rootId == null) {
     return <ProjectPicker onSelect={setRootId} />;
@@ -291,6 +305,32 @@ function BomView({
 
   const bomQuery = useBom(bomId ?? "");
 
+  // Components are added to a BOM document; without one, the header
+  // "Add component" button has nothing to open — explain instead of no-op.
+  const createBom = useCreateBom();
+  const noBoms = !bomsQuery.isLoading && projectBoms.length === 0;
+  const addComponentOpen = useUIStore((s) => s.bomAddComponentOpen);
+  const setBomAddComponentOpen = useUIStore((s) => s.setBomAddComponentOpen);
+  React.useEffect(() => {
+    if (addComponentOpen && noBoms) {
+      setBomAddComponentOpen(false);
+      toast.info(
+        "No BOM document yet",
+        "Components are added to a BOM document — create a draft BOM for this project first.",
+      );
+    }
+  }, [addComponentOpen, noBoms, setBomAddComponentOpen]);
+
+  const createDraft = async () => {
+    if (!ensureCanCreate("bom")) return;
+    try {
+      await createBom.mutateAsync({ project_id: rootId, bom_type: "Engineering" });
+      toast.success("Draft BOM created", `${project?.name ?? "Project"} — you can add components now`);
+    } catch (e) {
+      toast.error("Couldn't create BOM", e instanceof Error ? e.message : "Please try again");
+    }
+  };
+
   return (
     <QueryBoundary
       isLoading={bomsQuery.isLoading}
@@ -306,8 +346,19 @@ function BomView({
             </Button>
             <span className="text-[13px] font-medium">{project?.name ?? "Project"}</span>
           </div>
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            This project has no BOM documents yet.
+          <div className="flex flex-1 flex-col items-center justify-center gap-1.5">
+            <p className="text-sm text-muted-foreground">This project has no BOM documents yet.</p>
+            <p className="text-2xs text-muted-foreground">
+              Components are added to a BOM document — create a draft to get started.
+            </p>
+            <Button size="sm" className="mt-2" onClick={createDraft} disabled={createBom.isPending}>
+              {createBom.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              Create draft BOM
+            </Button>
           </div>
         </div>
       ) : (
@@ -673,7 +724,6 @@ function BomDocumentView({
                 <ContextMenuContent className="w-48">
                   <ContextMenuItem onClick={() => setActiveNode(node)}><Package /> Inspect</ContextMenuItem>
                   <ContextMenuItem onClick={() => showWhereUsed(node)}><Network /> Where used</ContextMenuItem>
-                  <ContextMenuItem onClick={() => router.push("/revisions")}><GitCompare /> Compare revision</ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem onClick={() => { copyToClipboard(node.partNumber); toast.success("Copied", node.partNumber); }}><Copy /> Copy part number</ContextMenuItem>
                 </ContextMenuContent>

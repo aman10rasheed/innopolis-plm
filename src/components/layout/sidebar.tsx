@@ -16,10 +16,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { db } from "@/mock/db";
+import { useBoms, useStockAlerts } from "@/lib/api";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -27,14 +26,14 @@ export function Sidebar() {
   const role = useAuthStore((s) => s.user?.role) ?? "Administrator";
   const groups = navForRole(role);
 
-  const openEcos = db().ecos.filter(
-    (e) => e.status === "Review" || e.status === "Draft",
-  ).length;
-  const pendingApprovals = db().approvals.filter((a) => a.status === "Pending").length;
+  // Live badge counts from the API (silently 0 while loading / on error).
+  const boms = useBoms().data?.items ?? [];
+  const pendingBoms = boms.filter((b) => b.stage !== "Released for Purchase").length;
+  const lowStock = useStockAlerts().data?.length ?? 0;
 
   const badgeFor = (badge?: string) => {
-    if (badge === "count") return openEcos;
-    if (badge === "alert") return pendingApprovals;
+    if (badge === "count") return pendingBoms;
+    if (badge === "alert") return lowStock;
     return null;
   };
 
@@ -134,7 +133,6 @@ export function Sidebar() {
           <SETTINGS_ITEM.icon className="size-[18px] shrink-0" />
           {!collapsed && <span>{SETTINGS_ITEM.label}</span>}
         </Link>
-        {!collapsed && <StorageMeter />}
       </div>
     </aside>
   );
@@ -145,15 +143,12 @@ function NewMenu({ collapsed }: { collapsed: boolean }) {
   const setCreatePartOpen = useUIStore((s) => s.setCreatePartOpen);
   const setCreateProductOpen = useUIStore((s) => s.setCreateProductOpen);
   const setCreateBomOpen = useUIStore((s) => s.setCreateBomOpen);
-  const setCreateEcoOpen = useUIStore((s) => s.setCreateEcoOpen);
   const setCreatePoOpen = useUIStore((s) => s.setCreatePoOpen);
   const setCreateVendorOpen = useUIStore((s) => s.setCreateVendorOpen);
-  const setCadImportOpen = useUIStore((s) => s.setCadImportOpen);
   const createItems: [string, string, () => void][] = [
     ["Material", "Add a material to the master", () => { router.push("/parts"); setCreatePartOpen(true); }],
     ["Project", "Open a project from enquiry", () => setCreateProductOpen(true)],
     ["Draft BOM", "Start a project BOM for approval", () => setCreateBomOpen(true)],
-    ["Change Request", "Raise a material change (MCR)", () => setCreateEcoOpen(true)],
     ["Purchase Order", "Draft a PO to a vendor", () => setCreatePoOpen(true)],
     ["Vendor", "Register a new vendor", () => setCreateVendorOpen(true)],
   ];
@@ -185,28 +180,8 @@ function NewMenu({ collapsed }: { collapsed: boolean }) {
             <span className="text-2xs text-muted-foreground">{desc}</span>
           </DropdownMenuItem>
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setCadImportOpen(true)}>
-          Import CAD…
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function StorageMeter() {
-  return (
-    <div className="mt-2 rounded-lg border border-border bg-surface-sunken/50 p-2.5">
-      <div className="flex items-center justify-between text-2xs">
-        <span className="font-medium text-foreground">Vault storage</span>
-        <span className="text-muted-foreground">68%</span>
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full w-[68%] rounded-full bg-gradient-to-r from-primary to-info" />
-      </div>
-      <p className="mt-1.5 text-2xs text-muted-foreground">
-        1.36 TB of 2 TB used
-      </p>
-    </div>
-  );
-}

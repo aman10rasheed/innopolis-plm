@@ -2,10 +2,10 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Search, Package, Boxes, Building2, FileText, GitPullRequestArrow, CornerDownLeft } from "lucide-react";
+import { Search, Package, Boxes, Building2, CornerDownLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useUIStore } from "@/stores/ui-store";
-import { db } from "@/mock/db";
+import { useParts, useProjects, useVendors } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface Result {
@@ -23,35 +23,30 @@ export function SearchDialog() {
   const [q, setQ] = React.useState("");
   const [active, setActive] = React.useState(0);
 
+  const parts = useParts().data?.items ?? [];
+  const products = useProjects().data?.items ?? [];
+  const suppliers = useVendors().data?.items ?? [];
+
   const results = React.useMemo<Result[]>(() => {
     if (!q.trim()) return [];
-    const d = db();
     const term = q.toLowerCase();
     const r: Result[] = [];
-    for (const p of d.parts) {
+    for (const p of parts) {
       if (p.name.toLowerCase().includes(term) || p.partNumber.toLowerCase().includes(term)) {
         r.push({ id: p.id, title: p.name, sub: `${p.partNumber} · ${p.category}`, type: "Part", icon: Boxes, href: "/parts" });
       }
       if (r.length > 40) break;
     }
-    for (const p of d.products) {
+    for (const p of products) {
       if (p.name.toLowerCase().includes(term) || p.code.toLowerCase().includes(term))
         r.push({ id: p.id, title: p.name, sub: `${p.code} · Project`, type: "Project", icon: Package, href: "/products" });
     }
-    for (const s of d.suppliers) {
+    for (const s of suppliers) {
       if (s.name.toLowerCase().includes(term))
         r.push({ id: s.id, title: s.name, sub: `${s.country} · Tier ${s.tier}`, type: "Supplier", icon: Building2, href: "/suppliers" });
     }
-    for (const e of d.ecos) {
-      if (e.title.toLowerCase().includes(term) || e.number.toLowerCase().includes(term))
-        r.push({ id: e.id, title: e.title, sub: `${e.number} · ${e.status}`, type: "Change", icon: GitPullRequestArrow, href: "/changes" });
-    }
-    for (const doc of d.documents) {
-      if (doc.name.toLowerCase().includes(term))
-        r.push({ id: doc.id, title: doc.name, sub: `${doc.type} · ${doc.format}`, type: "Document", icon: FileText, href: "/documents" });
-    }
     return r.slice(0, 24);
-  }, [q]);
+  }, [q, parts, products, suppliers]);
 
   React.useEffect(() => {
     setActive(0);
@@ -90,7 +85,7 @@ export function SearchDialog() {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search everything — parts, projects, suppliers, changes…"
+            placeholder="Search everything — parts, projects, suppliers…"
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           {q && (
@@ -105,17 +100,6 @@ export function SearchDialog() {
               <p className="text-sm text-muted-foreground">
                 Start typing to search across the entire workspace
               </p>
-              <div className="mt-2 flex flex-wrap justify-center gap-1.5">
-                {["BLDC", "ASM-2000", "Bosch", "ECO-45", "Stainless"].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setQ(s)}
-                    className="rounded-md border border-border bg-surface px-2 py-1 text-2xs text-muted-foreground hover:border-border-strong hover:text-foreground"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
           {q.trim() && results.length === 0 && (

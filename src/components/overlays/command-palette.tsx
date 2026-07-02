@@ -15,11 +15,9 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { useUIStore } from "@/stores/ui-store";
 import { ALL_NAV_ITEMS, SETTINGS_ITEM } from "@/constants/navigation";
-import { db } from "@/mock/db";
+import { useParts, useProjects, useVendors } from "@/lib/api";
 import {
   Plus,
-  Upload,
-  GitPullRequestArrow,
   Package,
   Boxes,
   Building2,
@@ -33,7 +31,7 @@ import { useTheme } from "next-themes";
 
 export function CommandPalette() {
   const router = useRouter();
-  const { commandOpen, setCommandOpen, toggleAi, setCreatePartOpen, setCreateEcoOpen, setCreateBomOpen, setCadImportOpen } = useUIStore();
+  const { commandOpen, setCommandOpen, toggleAi, setCreatePartOpen, setCreateBomOpen } = useUIStore();
   const { theme, setTheme } = useTheme();
 
   const go = (href: string) => {
@@ -45,10 +43,9 @@ export function CommandPalette() {
     fn();
   };
 
-  const d = db();
-  const parts = d.parts.slice(0, 6);
-  const suppliers = d.suppliers.slice(0, 3);
-  const products = d.products.slice(0, 4);
+  const parts = (useParts().data?.items ?? []).slice(0, 6);
+  const suppliers = (useVendors().data?.items ?? []).slice(0, 3);
+  const products = (useProjects().data?.items ?? []).slice(0, 4);
 
   return (
     <Dialog open={commandOpen} onOpenChange={setCommandOpen}>
@@ -75,12 +72,6 @@ export function CommandPalette() {
               </CommandItem>
               <CommandItem onSelect={() => run(() => setCreateBomOpen(true))}>
                 <Boxes /> Draft BOM
-              </CommandItem>
-              <CommandItem onSelect={() => run(() => setCreateEcoOpen(true))}>
-                <GitPullRequestArrow /> Open engineering change
-              </CommandItem>
-              <CommandItem onSelect={() => run(() => setCadImportOpen(true))}>
-                <Upload /> Import CAD model
               </CommandItem>
               <CommandItem onSelect={() => run(toggleAi)}>
                 <Sparkles /> Ask Innopolis AI
@@ -110,7 +101,7 @@ export function CommandPalette() {
 
             <CommandSeparator />
 
-            <CommandGroup heading="Products">
+            <CommandGroup heading="Projects">
               {products.map((p) => (
                 <CommandItem key={p.id} value={`product ${p.name} ${p.code}`} onSelect={() => go("/products")}>
                   <Package />
@@ -143,7 +134,7 @@ export function CommandPalette() {
 
           <div className="flex items-center justify-between border-t border-border px-3 py-2 text-2xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <FileText className="size-3" /> Search across {db().parts.length + db().products.length}+ items
+              <FileText className="size-3" /> Search parts, projects & vendors
             </span>
             <span className="flex items-center gap-2">
               <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">↑↓</kbd> navigate

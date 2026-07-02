@@ -16,7 +16,8 @@ import {
   MapPin,
   Plus,
 } from "lucide-react";
-import { useInventory, useWarehouses, useStockAlerts } from "@/lib/api";
+import { useInventory, useWarehouses, useStockAlerts, useCreatePo, api, toNumber } from "@/lib/api";
+import { ensureCanCreate } from "@/auth/permissions";
 import { QueryBoundary } from "@/components/shared/query-boundary";
 import type { InventoryRecord, Warehouse, Availability } from "@/types";
 import { Card } from "@/components/ui/card";
@@ -69,18 +70,77 @@ export function InventoryView() {
   const [reordered, setReordered] = React.useState<Set<string>>(() => new Set());
   const setCreateWarehouseOpen = useUIStore((s) => s.setCreateWarehouseOpen);
 
-  const reorder = (ids: string[], label: string) => {
-    const fresh = ids.filter((id) => !reordered.has(id));
+  const createPo = useCreatePo();
+  const [reordering, setReordering] = React.useState(false);
+
+  /** Order back up to max stock if maintained, else to 2× the reorder point. */
+  const replenishQty = (available: number, reorderPoint: number, maxStock: number) => {
+    const target = maxStock > 0 ? maxStock : reorderPoint * 2;
+    return Math.max(1, Math.ceil(target - available));
+  };
+
+  /**
+   * Reorder = draft real purchase orders: resolve each part's preferred vendor,
+   * group lines per vendor, and POST one PO per vendor (Draft, High priority).
+   */
+  const reorder = async (records: InventoryRecord[]) => {
+    if (!ensureCanCreate("purchaseOrder")) return;
+    const fresh = records.filter((r) => !reordered.has(r.id));
     if (!fresh.length) {
       toast.info("Already queued", "Those lines are already on a replenishment order");
       return;
     }
-    setReordered((prev) => {
-      const next = new Set(prev);
-      fresh.forEach((id) => next.add(id));
-      return next;
-    });
-    toast.success("Replenishment queued", label);
+    setReordering(true);
+    try {
+      const parts = await Promise.all(fresh.map((r) => api.parts.get(r.partId)));
+      const noVendor: string[] = [];
+      const byVendor = new Map<string, { record: InventoryRecord; unitPrice: number; maxStock: number }[]>();
+      parts.forEach((part, i) => {
+        const record = fresh[i]!;
+        if (!part.supplier_id) {
+          noVendor.push(record.partNumber);
+          return;
+        }
+        const group = byVendor.get(part.supplier_id) ?? [];
+        group.push({
+          record,
+          unitPrice: toNumber(part.last_purchase_price) || toNumber(part.unit_cost),
+          maxStock: toNumber(part.max_stock),
+        });
+        byVendor.set(part.supplier_id, group);
+      });
+
+      for (const [supplierId, items] of byVendor) {
+        await createPo.mutateAsync({
+          supplier_id: supplierId,
+          priority: "High",
+          lines: items.map(({ record, unitPrice, maxStock }) => ({
+            part_id: record.partId,
+            quantity: replenishQty(record.available, record.reorderPoint, maxStock),
+            unit_price: unitPrice,
+          })),
+        });
+      }
+
+      const queued = [...byVendor.values()].flat().map((x) => x.record.id);
+      if (queued.length) {
+        setReordered((prev) => new Set([...prev, ...queued]));
+        toast.success(
+          "Replenishment PO drafted",
+          `${queued.length} line(s) on ${byVendor.size} vendor PO(s) — see Procurement → Purchase Orders`,
+        );
+      }
+      if (noVendor.length) {
+        toast.warning(
+          "No preferred vendor",
+          `${noVendor.join(", ")} — set a vendor on the material, or raise the PO manually`,
+        );
+      }
+    } catch (e) {
+      toast.error("Reorder failed", e instanceof Error ? e.message : "Please try again");
+    } finally {
+      setReordering(false);
+    }
   };
 
   const series = React.useMemo(() => {
@@ -234,7 +294,8 @@ export function InventoryView() {
                 variant="outline"
                 size="xs"
                 className="ml-auto"
-                onClick={() => reorder(alerts.map((a) => a.id), `${alerts.length} replenishment line(s) queued`)}
+                disabled={reordering}
+                onClick={() => reorder(alerts)}
               >
                 <PackagePlus className="size-3.5" /> Reorder all
               </Button>
@@ -258,10 +319,10 @@ export function InventoryView() {
                   <Button
                     size="xs"
                     variant={reordered.has(r.id) ? "outline" : "default"}
-                    disabled={reordered.has(r.id)}
-                    onClick={() => reorder([r.id], `${r.partNumber} → ${r.warehouseCode}`)}
+                    disabled={reordered.has(r.id) || reordering}
+                    onClick={() => reorder([r])}
                   >
-                    {reordered.has(r.id) ? "Queued" : "Reorder"}
+                    {reordered.has(r.id) ? "PO drafted" : "Reorder"}
                   </Button>
                 </div>
               ))}

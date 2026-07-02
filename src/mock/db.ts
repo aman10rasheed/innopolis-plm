@@ -1,5 +1,6 @@
 import { generateDatabase, type Database, type BomEdge } from "./generate";
-import type { BomNode } from "@/types";
+import type { BomNode, User } from "@/types";
+import { useAuthStore } from "@/stores/auth-store";
 
 let _db: Database | null = null;
 
@@ -28,6 +29,31 @@ export function maps() {
     };
   }
   return _maps;
+}
+
+/**
+ * The signed-in account as a db User, registered on first use so
+ * getUser()/avatars resolve. The db no longer ships seeded users, so records
+ * created in-session (ECOs, revisions, documents) are owned by whoever is
+ * logged in rather than a fabricated demo user.
+ */
+export function currentUser(): User {
+  const cred = useAuthStore.getState().user;
+  const id = cred?.email ?? "user-unknown";
+  const existing = maps().userById.get(id);
+  if (existing) return existing;
+  const u: User = {
+    id,
+    name: cred?.name ?? "Unknown user",
+    initials: cred?.initials ?? "?",
+    role: cred?.role ?? "User",
+    team: cred?.role ?? "General",
+    hue: cred?.hue ?? 210,
+    online: true,
+  };
+  db().users.push(u);
+  maps().userById.set(id, u);
+  return u;
 }
 
 /** Insert helpers — prepend a freshly-created entity so it shows up first. */

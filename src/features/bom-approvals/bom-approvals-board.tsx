@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   useBoms,
+  useBom,
   useUsers,
   useCreateBom,
   useUpdateBom,
@@ -284,6 +285,19 @@ function BomEditDrawer({
   const [form, setForm] = React.useState<ProjectBom | null>(bom);
   React.useEffect(() => setForm(bom), [bom]);
 
+  // The list endpoint omits audit — fetch the BOM detail for the trail.
+  const detailQ = useBom(bom?.id ?? "");
+  const audit = React.useMemo(
+    () =>
+      (detailQ.data?.audit ?? []).map((a) => ({
+        stage: a.to_stage,
+        userId: a.user_id,
+        date: a.created_at,
+        comment: a.comment,
+      })),
+    [detailQ.data],
+  );
+
   return (
     <AnimatePresence>
       {bom && form && (
@@ -352,14 +366,16 @@ function BomEditDrawer({
                 <p className="mb-3 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <History className="size-3.5" /> Approval audit trail
                 </p>
-                {form.audit.length === 0 ? (
+                {detailQ.isLoading ? (
+                  <p className="text-[13px] text-muted-foreground">Loading audit history…</p>
+                ) : audit.length === 0 ? (
                   <p className="text-[13px] text-muted-foreground">No audit history yet.</p>
                 ) : (
                   <div className="relative space-y-0 pl-5">
                     <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
-                    {form.audit.map((a, i) => {
+                    {audit.map((a, i) => {
                       const user = userById.get(a.userId);
-                      const isLast = i === form.audit.length - 1;
+                      const isLast = i === audit.length - 1;
                       return (
                         <div key={i} className="relative pb-4">
                           <div className={cn("absolute -left-5 top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-surface", isLast ? "bg-primary" : "bg-success")}>

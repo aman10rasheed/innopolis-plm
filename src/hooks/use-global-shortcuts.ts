@@ -34,8 +34,6 @@ export function useGlobalShortcuts() {
       p: "/products",
       l: "/parts",
       b: "/bom",
-      c: "/cad",
-      e: "/changes",
       s: "/suppliers",
       i: "/inventory",
       a: "/analytics",

@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { Network, Plus, GitCompare } from "lucide-react";
+import { Network, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { BomExplorer } from "@/features/bom/bom-explorer";
@@ -16,14 +15,9 @@ export default function BomPage() {
         description="Multi-level bill of materials with live cost rollup, where-used and duplicate detection"
         icon={Network}
         actions={
-          <>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/revisions"><GitCompare className="size-4" /> Compare revisions</Link>
-            </Button>
-            <Button size="sm" onClick={() => setBomAddComponentOpen(true)}>
-              <Plus className="size-4" /> Add component
-            </Button>
-          </>
+          <Button size="sm" onClick={() => setBomAddComponentOpen(true)}>
+            <Plus className="size-4" /> Add component
+          </Button>
         }
       />
       <div className="min-h-0 flex-1">

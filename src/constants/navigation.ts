@@ -3,16 +3,9 @@ import {
   FolderKanban,
   Library,
   Network,
-  Box,
-  FileText,
-  GitPullRequestArrow,
   ClipboardCheck,
-  History,
-  Factory,
   Warehouse,
   ShoppingCart,
-  CircleDollarSign,
-  CheckCircle2,
   FileBarChart,
   BarChart3,
   Settings,
@@ -37,9 +30,6 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-const ENG: Role[] = ["Administrator", "Engineering"];
-const ALL_EXCEPT_NONE = undefined; // visible to everyone
-
 /** Navigation mapped to the Innopolis FRD modules & project lifecycle. */
 export const NAV_GROUPS: NavGroup[] = [
   {
@@ -55,17 +45,12 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Material Master", href: "/parts", icon: Library, shortcut: "G L", roles: ["Administrator", "Engineering", "Purchase"] },
       { label: "BOM Explorer", href: "/bom", icon: Network, shortcut: "G B", roles: ["Administrator", "Engineering", "Commercial", "Purchase"] },
-      { label: "CAD Viewer", href: "/cad", icon: Box, roles: ENG },
-      { label: "Documents", href: "/documents", icon: FileText, roles: ALL_EXCEPT_NONE },
     ],
   },
   {
     label: "Change Control",
     items: [
       { label: "BOM Approvals", href: "/bom-approvals", icon: ClipboardCheck, badge: "count", roles: ["Administrator", "Engineering", "Commercial", "Purchase"] },
-      { label: "Change Requests", href: "/changes", icon: GitPullRequestArrow, badge: "count", roles: ["Administrator", "Engineering", "Commercial"] },
-      { label: "Revisions", href: "/revisions", icon: History, roles: ["Administrator", "Engineering", "Commercial"] },
-      { label: "Approvals", href: "/approvals", icon: CheckCircle2, badge: "alert", roles: ["Administrator", "Commercial", "Management"] },
     ],
   },
   {
@@ -73,9 +58,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Vendors", href: "/suppliers", icon: Building2, roles: ["Administrator", "Purchase", "Stores", "Commercial"] },
       { label: "Procurement", href: "/procurement", icon: ShoppingCart, roles: ["Administrator", "Purchase", "Commercial"] },
-      { label: "Manufacturing", href: "/manufacturing", icon: Factory, roles: ["Administrator", "Stores", "Engineering", "Management"] },
       { label: "Inventory", href: "/inventory", icon: Warehouse, badge: "alert", roles: ["Administrator", "Stores", "Purchase", "Management"] },
-      { label: "Cost Analysis", href: "/cost", icon: CircleDollarSign, roles: ["Administrator", "Commercial", "Management"] },
     ],
   },
   {

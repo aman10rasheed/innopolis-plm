@@ -62,7 +62,7 @@ export const ROLE_META: Record<Role, RoleMeta> = {
     label: "Commercial",
     blurb: "Review pricing & approve commercial stages",
     capabilities: ["Review pricing", "Commercial approval", "Quotation comparison", "Cost analysis"],
-    home: "/approvals",
+    home: "/bom-approvals",
     color: "warning",
   },
   Purchase: {

@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { FolderKanban, Plus, FileText } from "lucide-react";
+import { FolderKanban, Plus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { ProductsView } from "@/features/products/products-view";
@@ -19,14 +18,9 @@ export default function ProjectsPage() {
         description={`${count} projects · enquiry to delivery`}
         icon={FolderKanban}
         actions={
-          <>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/project-details"><FileText className="size-4" /> Project details · Invoice</Link>
-            </Button>
-            <Button size="sm" onClick={() => setCreateProductOpen(true)}>
-              <Plus className="size-4" /> New project
-            </Button>
-          </>
+          <Button size="sm" onClick={() => setCreateProductOpen(true)}>
+            <Plus className="size-4" /> New project
+          </Button>
         }
       />
       <div className="min-h-0 flex-1">

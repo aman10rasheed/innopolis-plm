@@ -20,16 +20,23 @@ import {
 } from "lucide-react";
 import {
   useRfqs,
+  useRfq,
   useRfqQuotations,
   useCreateRfq,
+  useSendRfq,
+  useAddQuotation,
   useAwardQuotation,
   usePurchaseOrders,
   usePurchaseOrder,
   useSetPoStatus,
   useReceivePo,
   useVendors,
+  useBoms,
+  useCategories,
+  useWarehouses,
   toNumber,
 } from "@/lib/api";
+import type { ApiPoDetail } from "@/lib/api";
 import type {
   RfqMode,
   Rfq,
@@ -37,6 +44,7 @@ import type {
   PoStatus,
 } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
+import { ensureCanCreate } from "@/auth/permissions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +63,15 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   RFQ_STATUS_VARIANT,
   QUOTATION_STATUS_VARIANT,
@@ -133,6 +150,7 @@ function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void 
   const rfqs = q.data?.items ?? [];
   const nameMap = useVendorNameMap();
   const [genOpen, setGenOpen] = React.useState(false);
+  const [quoteRfqId, setQuoteRfqId] = React.useState<string | null>(null);
 
   return (
     <div className="flex h-full flex-col">
@@ -141,7 +159,11 @@ function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void 
           Requests for Quotation
         </h2>
         <Badge variant="muted">{rfqs.length}</Badge>
-        <Button size="sm" className="ml-auto" onClick={() => setGenOpen(true)}>
+        <Button
+          size="sm"
+          className="ml-auto"
+          onClick={() => ensureCanCreate("rfq") && setGenOpen(true)}
+        >
           <Sparkles className="size-4" /> Generate RFQ
         </Button>
       </div>
@@ -163,10 +185,13 @@ function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void 
               </div>
               <div className="divide-y divide-border bg-surface/30">
                 {rfqs.map((rfq) => (
-                  <button
+                  <div
                     key={rfq.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onOpenComparison(rfq.id)}
-                    className="grid w-full grid-cols-[1fr_2fr_1.1fr_1fr_0.9fr_0.8fr_0.7fr_0.9fr_1.1fr] items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
+                    onKeyDown={(e) => e.key === "Enter" && onOpenComparison(rfq.id)}
+                    className="grid w-full cursor-pointer grid-cols-[1fr_2fr_1.1fr_1fr_0.9fr_0.8fr_0.7fr_0.9fr_1.1fr] items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-accent/40"
                   >
                     <span className="font-mono text-[13px] font-medium">{rfq.number}</span>
                     <div className="min-w-0">
@@ -187,16 +212,32 @@ function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void 
                     <span className="text-right text-[13px] font-semibold tabular">
                       {formatCompactCurrency(rfq.estValue)}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <Progress
-                        value={(rfq.quotesReceived / Math.max(1, rfq.quotesExpected)) * 100}
-                        className="h-1.5 flex-1"
-                      />
-                      <span className="w-8 shrink-0 text-right text-2xs tabular text-muted-foreground">
-                        {rfq.quotesReceived}/{rfq.quotesExpected}
-                      </span>
-                    </div>
-                  </button>
+                    {rfq.status === "Draft" ? (
+                      <SendRfqButton rfqId={rfq.id} rfqNumber={rfq.number} />
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Progress
+                          value={(rfq.quotesReceived / Math.max(1, rfq.quotesExpected)) * 100}
+                          className="h-1.5 flex-1"
+                        />
+                        <span className="w-8 shrink-0 text-right text-2xs tabular text-muted-foreground">
+                          {rfq.quotesReceived}/{rfq.quotesExpected}
+                        </span>
+                        {(rfq.status === "Sent" || rfq.status === "Quotes In") && (
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuoteRfqId(rfq.id);
+                            }}
+                          >
+                            Quote
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -208,7 +249,162 @@ function RfqsTab({ onOpenComparison }: { onOpenComparison: (id: string) => void 
       </ScrollArea>
 
       <GenerateRfqDialog open={genOpen} onOpenChange={setGenOpen} />
+      <RecordQuotationDialog rfqId={quoteRfqId} onClose={() => setQuoteRfqId(null)} />
     </div>
+  );
+}
+
+/**
+ * Record a vendor's quotation against a Sent RFQ — one unit price per RFQ line.
+ * POST /api/rfqs/:id/quotations (one quotation per vendor).
+ */
+function RecordQuotationDialog({ rfqId, onClose }: { rfqId: string | null; onClose: () => void }) {
+  const detailQ = useRfq(rfqId ?? "");
+  const detail = detailQ.data;
+  const vendors = useVendors().data?.items ?? [];
+  const addQuotation = useAddQuotation();
+
+  const [vendorId, setVendorId] = React.useState("");
+  const [leadTime, setLeadTime] = React.useState("21");
+  const [paymentTerms, setPaymentTerms] = React.useState("30 days");
+  const [prices, setPrices] = React.useState<Record<string, string>>({});
+
+  // reset whenever a different RFQ is opened
+  React.useEffect(() => {
+    setVendorId("");
+    setLeadTime("21");
+    setPaymentTerms("30 days");
+    setPrices({});
+  }, [rfqId]);
+
+  // vendors on the RFQ that haven't quoted yet
+  const alreadyQuoted = new Set((detail?.quotations ?? []).map((qt) => qt.vendor_id));
+  const eligibleVendors = vendors.filter(
+    (v) => (detail?.vendor_ids ?? []).includes(v.id) && !alreadyQuoted.has(v.id),
+  );
+
+  const lines = detail?.lines ?? [];
+  const allPriced = lines.length > 0 && lines.every((l) => Number(prices[l.id]) > 0);
+  const canSubmit = !!rfqId && !!vendorId && allPriced && !addQuotation.isPending;
+
+  const submit = async () => {
+    if (!canSubmit || !rfqId) return;
+    try {
+      await addQuotation.mutateAsync({
+        rfqId,
+        body: {
+          vendor_id: vendorId,
+          lead_time_days: Math.max(1, Math.round(Number(leadTime) || 21)),
+          payment_terms: paymentTerms,
+          lines: lines.map((l) => ({ rfq_line_id: l.id, unit_price: Number(prices[l.id]) })),
+        },
+      });
+      toast.success("Quotation recorded", `${detail?.number ?? "RFQ"} — quote saved for comparison`);
+      onClose();
+    } catch (err) {
+      toast.error("Could not record quotation", err instanceof Error ? err.message : "Please try again.");
+    }
+  };
+
+  return (
+    <Dialog open={!!rfqId} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Record quotation</DialogTitle>
+          <DialogDescription>
+            {detail ? `${detail.number} · ${detail.title}` : "Loading RFQ…"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <label className="block space-y-1 sm:col-span-1">
+              <span className="text-2xs font-medium text-muted-foreground">Vendor</span>
+              <Select value={vendorId} onValueChange={setVendorId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={eligibleVendors.length ? "Select…" : "All quoted"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {eligibleVendors.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">Lead time (days)</span>
+              <Input type="number" min={1} value={leadTime} onChange={(e) => setLeadTime(e.target.value)} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">Payment terms</span>
+              <Input value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} />
+            </label>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-2xs font-medium text-muted-foreground">Unit price per line</span>
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-border">
+              {lines.length === 0 ? (
+                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">
+                  {detailQ.isLoading ? "Loading lines…" : "No lines on this RFQ"}
+                </div>
+              ) : (
+                lines.map((l) => (
+                  <div
+                    key={l.id}
+                    className="flex items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium">{l.name}</p>
+                      <p className="font-mono text-2xs text-muted-foreground">
+                        {l.part_number} · qty {toNumber(l.quantity)}
+                      </p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="any"
+                      placeholder="Unit price"
+                      className="w-32"
+                      value={prices[l.id] ?? ""}
+                      onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm">Cancel</Button>
+          </DialogClose>
+          <Button size="sm" onClick={submit} disabled={!canSubmit}>
+            Record quote
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Inline "Send" action for Draft RFQs — issues the RFQ to its vendors. */
+function SendRfqButton({ rfqId, rfqNumber }: { rfqId: string; rfqNumber: string }) {
+  const sendRfq = useSendRfq();
+  const send = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await sendRfq.mutateAsync(rfqId);
+      toast.success("RFQ sent", `${rfqNumber} issued to vendors — quotes can now be recorded`);
+    } catch (err) {
+      toast.error("Could not send RFQ", err instanceof Error ? err.message : "Please try again.");
+    }
+  };
+  return (
+    <Button size="xs" variant="outline" className="gap-1.5" onClick={send} disabled={sendRfq.isPending}>
+      <Send className="size-3" /> Send
+    </Button>
   );
 }
 
@@ -261,16 +457,50 @@ function GenerateRfqDialog({
   onOpenChange: (v: boolean) => void;
 }) {
   const [mode, setMode] = React.useState<RfqMode>("Vendor-wise");
+  const [title, setTitle] = React.useState("");
+  const [bomId, setBomId] = React.useState<string>("");
+  const [category, setCategory] = React.useState<string>("");
+  const [vendorIds, setVendorIds] = React.useState<Set<string>>(new Set());
   const createRfq = useCreateRfq();
 
+  const bomsQuery = useBoms();
+  // Only BOMs that actually have lines can seed an RFQ (server rejects empty ones).
+  const boms = (bomsQuery.data?.items ?? []).filter((b) => b.lineItems > 0);
+  const vendors = useVendors().data?.items ?? [];
+  const categories = useCategories().data ?? [];
+
+  // reset the form each time the dialog opens
+  React.useEffect(() => {
+    if (open) {
+      setMode("Vendor-wise");
+      setTitle("");
+      setBomId("");
+      setCategory("");
+      setVendorIds(new Set());
+    }
+  }, [open]);
+
+  const toggleVendor = (id: string) =>
+    setVendorIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const canGenerate = !!bomId && vendorIds.size > 0 && !createRfq.isPending;
+
   const generate = async () => {
+    if (!canGenerate) return;
+    const bom = boms.find((b) => b.id === bomId);
     try {
       await createRfq.mutateAsync({
-        title: `${mode} RFQ`,
+        title: title.trim() || `${mode} RFQ — ${bom?.number ?? "BOM"}`,
         mode,
-        status: "Draft",
+        from_bom_id: bomId,
+        vendor_ids: [...vendorIds],
+        ...(mode === "Category-wise" && category ? { category } : {}),
       });
-      toast.success("RFQ generated", `New ${mode} RFQ created`);
+      toast.success("RFQ generated", `New ${mode} RFQ created from ${bom?.number ?? "BOM"}`);
       onOpenChange(false);
     } catch (err) {
       toast.error(
@@ -282,51 +512,122 @@ function GenerateRfqDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>Generate RFQ</DialogTitle>
           <DialogDescription>
-            Choose how line items should be grouped into requests for quotation.
+            Pick a source BOM, the vendors to quote, and how line items should be grouped.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {RFQ_MODES.map(({ mode: m, icon: Icon, hint }) => {
-            const active = mode === m;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={cn(
-                  "flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors",
-                  active
-                    ? "border-primary bg-primary/[0.06] ring-1 ring-primary/40"
-                    : "border-border hover:bg-accent/40",
-                )}
-              >
-                <div
+        <div className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-2xs font-medium text-muted-foreground">Title (optional)</span>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Fermenter valves & bearings"
+            />
+          </label>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">Source BOM</span>
+              <Select value={bomId} onValueChange={setBomId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={boms.length ? "Select a BOM…" : "No BOMs with lines"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {boms.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.number} · {b.projectNumber || b.projectName || "—"} · {b.lineItems} lines
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            {mode === "Category-wise" && (
+              <label className="block space-y-1">
+                <span className="text-2xs font-medium text-muted-foreground">Category filter</span>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-2xs font-medium text-muted-foreground">
+              Vendors ({vendorIds.size} selected)
+            </span>
+            <div className="max-h-36 overflow-y-auto rounded-lg border border-border">
+              {vendors.length === 0 ? (
+                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">No vendors available</div>
+              ) : (
+                vendors.map((v) => (
+                  <label
+                    key={v.id}
+                    className="flex cursor-pointer items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0 hover:bg-accent/40"
+                  >
+                    <Checkbox
+                      checked={vendorIds.has(v.id)}
+                      onCheckedChange={() => toggleVendor(v.id)}
+                      className="size-3.5"
+                    />
+                    <span className="flex-1 truncate text-[13px]">{v.name}</span>
+                    <span className="font-mono text-2xs text-muted-foreground">{v.code}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {RFQ_MODES.map(({ mode: m, icon: Icon, hint }) => {
+              const active = mode === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
                   className={cn(
-                    "flex size-7 shrink-0 items-center justify-center rounded-lg",
-                    active ? "bg-primary/15 text-primary" : "bg-surface-sunken text-muted-foreground",
+                    "flex items-start gap-2.5 rounded-lg border p-3 text-left transition-colors",
+                    active
+                      ? "border-primary bg-primary/[0.06] ring-1 ring-primary/40"
+                      : "border-border hover:bg-accent/40",
                   )}
                 >
-                  <Icon className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium">{m}</p>
-                  <p className="text-2xs leading-snug text-muted-foreground">{hint}</p>
-                </div>
-              </button>
-            );
-          })}
+                  <div
+                    className={cn(
+                      "flex size-7 shrink-0 items-center justify-center rounded-lg",
+                      active ? "bg-primary/15 text-primary" : "bg-surface-sunken text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">{m}</p>
+                    <p className="text-2xs leading-snug text-muted-foreground">{hint}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" size="sm">Cancel</Button>
           </DialogClose>
-          <Button size="sm" onClick={generate} disabled={createRfq.isPending}>
+          <Button size="sm" onClick={generate} disabled={!canGenerate}>
             <Sparkles className="size-4" /> Generate
           </Button>
         </DialogFooter>
@@ -791,6 +1092,7 @@ function PoDetailDialog({
   const setStatus = useSetPoStatus();
   const receive = useReceivePo();
   const po = detail.data;
+  const [receiveOpen, setReceiveOpen] = React.useState(false);
 
   const advance = async () => {
     if (!po) return;
@@ -802,27 +1104,6 @@ function PoDetailDialog({
     } catch (err) {
       toast.error(
         "Could not update status",
-        err instanceof Error ? err.message : "Please try again.",
-      );
-    }
-  };
-
-  const receiveGoods = async () => {
-    if (!po) return;
-    try {
-      await receive.mutateAsync({
-        id: po.id,
-        body: {
-          lines: po.lines.map((line) => ({
-            po_line_id: line.id,
-            received_qty: toNumber(line.quantity) - toNumber(line.received_qty),
-          })),
-        },
-      });
-      toast.success("Goods received", `Receipt booked against ${po.number}`);
-    } catch (err) {
-      toast.error(
-        "Could not receive goods",
         err instanceof Error ? err.message : "Please try again.",
       );
     }
@@ -907,7 +1188,7 @@ function PoDetailDialog({
                   </Button>
                 )}
                 {canReceive && (
-                  <Button size="sm" onClick={receiveGoods} disabled={receive.isPending}>
+                  <Button size="sm" onClick={() => setReceiveOpen(true)} disabled={receive.isPending}>
                     <PackageCheck className="size-4" /> Receive goods
                   </Button>
                 )}
@@ -915,6 +1196,198 @@ function PoDetailDialog({
             </>
           )}
         </QueryBoundary>
+      </DialogContent>
+      {po && (
+        <ReceiveGoodsDialog
+          po={po}
+          open={receiveOpen}
+          onOpenChange={setReceiveOpen}
+          receive={receive}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Goods receipt — books received/rejected quantities per PO line into a chosen
+ * warehouse (POST /purchase-orders/:id/receive with warehouse_id + batch).
+ */
+function ReceiveGoodsDialog({
+  po,
+  open,
+  onOpenChange,
+  receive,
+}: {
+  po: ApiPoDetail;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  receive: ReturnType<typeof useReceivePo>;
+}) {
+  const warehousesQuery = useWarehouses();
+  const warehouses = warehousesQuery.data ?? [];
+  const [warehouseId, setWarehouseId] = React.useState("");
+
+  // lines with anything left to receive, with editable qty / rejected / batch
+  const outstanding = React.useMemo(
+    () =>
+      po.lines
+        .map((l) => ({ line: l, remaining: toNumber(l.quantity) - toNumber(l.received_qty) }))
+        .filter((x) => x.remaining > 0),
+    [po.lines],
+  );
+  const [rows, setRows] = React.useState<Record<string, { qty: string; rejected: string; batch: string }>>({});
+
+  // reset the form each time the dialog opens: default to receive the full remainder
+  React.useEffect(() => {
+    if (!open) return;
+    setRows(
+      Object.fromEntries(
+        outstanding.map(({ line, remaining }) => [
+          line.id,
+          { qty: String(remaining), rejected: "0", batch: "" },
+        ]),
+      ),
+    );
+    setWarehouseId((prev) => prev || warehouses[0]?.id || "");
+  }, [open, outstanding, warehouses]);
+
+  const setRow = (id: string, patch: Partial<{ qty: string; rejected: string; batch: string }>) =>
+    setRows((prev) => ({ ...prev, [id]: { ...prev[id]!, ...patch } }));
+
+  const parsed = outstanding.map(({ line, remaining }) => {
+    const row = rows[line.id] ?? { qty: "0", rejected: "0", batch: "" };
+    const qty = Number(row.qty);
+    const rejected = Number(row.rejected);
+    const valid =
+      Number.isFinite(qty) && Number.isFinite(rejected) &&
+      qty >= 0 && rejected >= 0 && qty + rejected <= remaining;
+    return { line, remaining, row, qty, rejected, valid };
+  });
+  const anyQuantity = parsed.some((p) => p.qty > 0 || p.rejected > 0);
+  const canSubmit =
+    !!warehouseId && anyQuantity && parsed.every((p) => p.valid) && !receive.isPending;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    const wh = warehouses.find((w) => w.id === warehouseId);
+    try {
+      await receive.mutateAsync({
+        id: po.id,
+        body: {
+          warehouse_id: warehouseId,
+          lines: parsed
+            .filter((p) => p.qty > 0 || p.rejected > 0)
+            .map((p) => ({
+              po_line_id: p.line.id,
+              // API semantics: received_qty is gross (accepted + rejected);
+              // the backend books received_qty − rejected_qty into stock.
+              received_qty: p.qty + p.rejected,
+              rejected_qty: p.rejected > 0 ? p.rejected : undefined,
+              batch: p.row.batch.trim() || undefined,
+            })),
+        },
+      });
+      toast.success(
+        "Goods received",
+        `${po.number} → ${wh ? `${wh.code} · ${wh.name}` : "warehouse"}`,
+      );
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(
+        "Could not receive goods",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Receive goods</DialogTitle>
+          <DialogDescription>
+            Book a receipt against {po.number} — pick the warehouse the stock goes into.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-2xs font-medium text-muted-foreground">Receiving warehouse</span>
+            <Select value={warehouseId} onValueChange={setWarehouseId}>
+              <SelectTrigger>
+                <SelectValue placeholder={warehousesQuery.isLoading ? "Loading warehouses…" : "Select warehouse"} />
+              </SelectTrigger>
+              <SelectContent>
+                {warehouses.map((w) => (
+                  <SelectItem key={w.id} value={w.id}>
+                    {w.code} · {w.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.9fr] items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <span>Material</span>
+              <span className="text-right">Open</span>
+              <span className="text-right">Receive</span>
+              <span className="text-right">Reject</span>
+              <span>Batch</span>
+            </div>
+            <div className="max-h-64 divide-y divide-border overflow-auto">
+              {parsed.map(({ line, remaining, row, valid }) => (
+                <div
+                  key={line.id}
+                  className="grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.9fr] items-center gap-2 px-3 py-2 text-[13px]"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{line.name}</p>
+                    <p className="truncate font-mono text-2xs text-muted-foreground">{line.part_number}</p>
+                  </div>
+                  <span className="text-right tabular text-muted-foreground">{remaining}</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={remaining}
+                    step="any"
+                    value={row.qty}
+                    onChange={(e) => setRow(line.id, { qty: e.target.value })}
+                    className={cn("h-7 text-right tabular", !valid && "border-destructive")}
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    max={remaining}
+                    step="any"
+                    value={row.rejected}
+                    onChange={(e) => setRow(line.id, { rejected: e.target.value })}
+                    className={cn("h-7 text-right tabular", !valid && "border-destructive")}
+                  />
+                  <Input
+                    value={row.batch}
+                    onChange={(e) => setRow(line.id, { batch: e.target.value })}
+                    placeholder="e.g. LOT-042"
+                    className="h-7 font-mono text-2xs"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="text-2xs text-muted-foreground">
+            Receive + reject cannot exceed the open quantity per line. Rejected units are not booked into stock.
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={submit} disabled={!canSubmit}>
+            <PackageCheck className="size-4" /> Book receipt
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
