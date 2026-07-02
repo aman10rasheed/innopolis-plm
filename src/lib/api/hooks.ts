@@ -217,7 +217,19 @@ export const useRfqs = (filters?: Query) =>
 export const useRfq = (id: string) =>
   useQuery({ queryKey: qk.rfq(id), queryFn: () => api.rfqs.get(id), enabled: !!id });
 export const useComparison = (id: string) =>
-  useQuery({ queryKey: qk.comparison(id), queryFn: () => api.rfqs.comparison(id), enabled: !!id });
+  useQuery({
+    queryKey: qk.comparison(id),
+    // The /comparison endpoint computes rank + weighted score per quote;
+    // the plain /quotations list does not. Map to domain quotations here.
+    queryFn: async () => {
+      const c = await api.rfqs.comparison(id);
+      return {
+        recommended: c.recommended ? m.mapQuotation(c.recommended) : null,
+        quotations: c.quotations.map(m.mapQuotation),
+      };
+    },
+    enabled: !!id,
+  });
 export function useSendRfq() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api.rfqs.send(id), onSuccess: (_d, id) => { qc.invalidateQueries({ queryKey: qk.rfq(id) }); qc.invalidateQueries({ queryKey: ["rfqs"] }); } });

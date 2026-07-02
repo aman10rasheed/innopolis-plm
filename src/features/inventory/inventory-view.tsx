@@ -63,6 +63,20 @@ export function InventoryView() {
   const inventory = inventoryQuery.data?.items ?? [];
   const warehouses = warehousesQuery.data ?? [];
 
+  // The /warehouses list doesn't carry per-warehouse rollups (only the detail
+  // endpoint does), so aggregate SKUs / value / low-stock from the stock records.
+  const whAgg = React.useMemo(() => {
+    const m = new Map<string, { skuCount: number; stockValue: number; lowStock: number }>();
+    for (const r of inventory) {
+      const a = m.get(r.warehouseId) ?? { skuCount: 0, stockValue: 0, lowStock: 0 };
+      a.skuCount += 1;
+      a.stockValue += r.onHand * r.unitCost;
+      if (r.status === "Low Stock" || r.status === "Out of Stock" || r.status === "Backorder") a.lowStock += 1;
+      m.set(r.warehouseId, a);
+    }
+    return m;
+  }, [inventory]);
+
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<"all" | Availability>("all");
   const [activeWh, setActiveWh] = React.useState<string | null>(null);
@@ -205,6 +219,11 @@ export function InventoryView() {
             {warehouses.map((w) => {
               const Icon = WH_ICON[w.type];
               const selected = activeWh === w.id;
+              // Prefer the computed rollup; fall back to any summary the API supplied.
+              const agg = whAgg.get(w.id);
+              const skuCount = agg?.skuCount ?? w.skuCount;
+              const stockValue = agg?.stockValue ?? w.stockValue;
+              const lowStock = agg?.lowStock ?? w.lowStockItems;
               return (
                 <Card
                   key={w.id}
@@ -249,16 +268,16 @@ export function InventoryView() {
                   <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3 text-center">
                     <div>
                       <p className="text-2xs text-muted-foreground">SKUs</p>
-                      <p className="text-[13px] font-semibold tabular">{formatNumber(w.skuCount)}</p>
+                      <p className="text-[13px] font-semibold tabular">{formatNumber(skuCount)}</p>
                     </div>
                     <div>
                       <p className="text-2xs text-muted-foreground">Value</p>
-                      <p className="text-[13px] font-semibold tabular">{formatCompactCurrency(w.stockValue)}</p>
+                      <p className="text-[13px] font-semibold tabular">{formatCompactCurrency(stockValue)}</p>
                     </div>
                     <div>
                       <p className="text-2xs text-muted-foreground">Low stock</p>
-                      <p className={cn("text-[13px] font-semibold tabular", w.lowStockItems > 0 ? "text-destructive" : "text-success")}>
-                        {w.lowStockItems}
+                      <p className={cn("text-[13px] font-semibold tabular", lowStock > 0 ? "text-destructive" : "text-success")}>
+                        {lowStock}
                       </p>
                     </div>
                   </div>

@@ -9,6 +9,7 @@ import {
   Rows3,
   X,
   ChevronRight,
+  ChevronLeft,
   Building2,
   CircleDollarSign,
   TrendingUp,
@@ -23,8 +24,11 @@ import {
   Activity as ActivityIcon,
   User as UserIcon,
 } from "lucide-react";
-import { useProjects, useUsers, useBoms, useRfqs } from "@/lib/api";
+import { useProjects, useProject, useBoms, useRfqs, useSaveProject } from "@/lib/api";
 import { QueryBoundary } from "@/components/shared/query-boundary";
+import { toast } from "@/components/ui/toast";
+import { canCreate } from "@/auth/permissions";
+import { useAuthStore } from "@/stores/auth-store";
 import type { Product, ProjectStage, Eco } from "@/types";
 import { PROJECT_STAGES } from "@/types";
 import { Card } from "@/components/ui/card";
@@ -51,24 +55,26 @@ import {
   cn,
 } from "@/lib/utils";
 import { monthlySeries } from "@/mock/series";
-import type { ApiUserFull } from "@/lib/api";
 
 function healthColor(h: number) {
   return h > 80 ? "bg-success" : h > 60 ? "bg-warning" : "bg-destructive";
 }
 
-/** Look up an engineer/owner by id from the fetched users list. */
-type UserLike = Pick<ApiUserFull, "name" | "initials" | "hue" | "role">;
+/** Minimal engineer display shape — sourced from the record's inline
+ * attribution fields (no admin-only users lookup). */
+type UserLike = { name?: string | null; initials?: string | null; hue?: number | null; role?: string };
+
+/** Build an engineer display object from a project's inline fields, or
+ * undefined when the API didn't return attribution (e.g. list responses). */
+function engineerOf(p: Product): UserLike | undefined {
+  return p.engineerName || p.engineerInitials
+    ? { name: p.engineerName, initials: p.engineerInitials, hue: p.engineerHue }
+    : undefined;
+}
 
 export function ProductsView() {
   const q = useProjects();
   const projects = q.data?.items ?? [];
-  const usersQuery = useUsers();
-  const usersById = React.useMemo(() => {
-    const m = new Map<string, UserLike>();
-    for (const u of usersQuery.data?.items ?? []) m.set(u.id, u);
-    return m;
-  }, [usersQuery.data]);
   const FAMILIES = React.useMemo(
     () => [...new Set(projects.map((p) => p.family))],
     [projects],
@@ -193,7 +199,7 @@ export function ProductsView() {
         {view === "grid" ? (
           <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {filtered.map((p) => (
-              <ProjectCard key={p.id} project={p} engineer={usersById.get(p.engineerId)} onOpen={() => setActive(p)} />
+              <ProjectCard key={p.id} project={p} engineer={engineerOf(p)} onOpen={() => setActive(p)} />
             ))}
           </div>
         ) : (
@@ -210,7 +216,7 @@ export function ProductsView() {
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                     {group.map((p) => (
-                      <ProjectCard key={p.id} project={p} engineer={usersById.get(p.engineerId)} onOpen={() => setActive(p)} />
+                      <ProjectCard key={p.id} project={p} engineer={engineerOf(p)} onOpen={() => setActive(p)} />
                     ))}
                   </div>
                 </section>
@@ -223,7 +229,17 @@ export function ProductsView() {
         )}
       </ScrollArea>
 
-      <ProjectDrawer project={active} engineer={active ? usersById.get(active.engineerId) : undefined} onClose={() => setActive(null)} />
+      {(() => {
+        // Re-read the selected project from the live query so the drawer reflects
+        // stage changes (and any other edits) after a refetch, not a stale snapshot.
+        const live = active ? projects.find((p) => p.id === active.id) ?? active : null;
+        return (
+          <ProjectDrawer
+            project={live}
+            onClose={() => setActive(null)}
+          />
+        );
+      })()}
     </div>
     </QueryBoundary>
   );
@@ -358,15 +374,21 @@ function ProjectCard({ project: p, engineer, onOpen }: { project: Product; engin
 
       <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
         <div className="flex items-center gap-2">
-          <Avatar className="size-6">
-            <AvatarFallback
-              className="text-[9px]"
-              style={{ background: `hsl(${engineer?.hue} 55% 22%)`, color: `hsl(${engineer?.hue} 80% 76%)` }}
-            >
-              {engineer?.initials}
-            </AvatarFallback>
-          </Avatar>
-          <span className="truncate text-2xs text-muted-foreground">{engineer?.name}</span>
+          {engineer ? (
+            <>
+              <Avatar className="size-6">
+                <AvatarFallback
+                  className="text-[9px]"
+                  style={{ background: `hsl(${engineer.hue ?? 220} 55% 22%)`, color: `hsl(${engineer.hue ?? 220} 80% 76%)` }}
+                >
+                  {engineer.initials ?? "?"}
+                </AvatarFallback>
+              </Avatar>
+              <span className="truncate text-2xs text-muted-foreground">{engineer.name ?? "Unassigned"}</span>
+            </>
+          ) : (
+            <span className="text-2xs text-muted-foreground/60">No lead engineer</span>
+          )}
         </div>
         <span className="flex items-center gap-1 text-2xs text-muted-foreground">
           <ListTree className="size-3" />
@@ -385,7 +407,7 @@ function ProjectCard({ project: p, engineer, onOpen }: { project: Product; engin
 /* ════════════════════════════════════════════════════════════════════
  *  Detail drawer
  * ════════════════════════════════════════════════════════════════════ */
-function ProjectDrawer({ project, engineer, onClose }: { project: Product | null; engineer?: UserLike; onClose: () => void }) {
+function ProjectDrawer({ project, onClose }: { project: Product | null; onClose: () => void }) {
   return (
     <AnimatePresence>
       {project && (
@@ -404,7 +426,7 @@ function ProjectDrawer({ project, engineer, onClose }: { project: Product | null
             transition={{ type: "spring", stiffness: 360, damping: 36 }}
             className="fixed right-0 top-0 z-[141] flex h-full w-[540px] max-w-[94vw] flex-col border-l border-border bg-surface-overlay shadow-lg"
           >
-            <ProjectDrawerBody project={project} engineer={engineer} onClose={onClose} />
+            <ProjectDrawerBody project={project} onClose={onClose} />
           </motion.aside>
         </>
       )}
@@ -412,7 +434,11 @@ function ProjectDrawer({ project, engineer, onClose }: { project: Product | null
   );
 }
 
-function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; engineer?: UserLike; onClose: () => void }) {
+function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: () => void }) {
+  // The detail endpoint returns inline engineer attribution (name/initials/hue);
+  // list responses don't, so fetch the detail to show the lead engineer.
+  const detailQ = useProject(project.id);
+  const engineer = engineerOf(detailQ.data ?? project);
   const boms = (useBoms({ project_id: project.id }).data?.items ?? []).filter((b) => b.projectId === project.id);
   const rfqs = (useRfqs({ project_id: project.id }).data?.items ?? []).filter((r) => r.projectId === project.id);
   // No ECO/change-request endpoint is exposed by the API layer, so project
@@ -423,6 +449,23 @@ function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; e
     [project],
   );
   const currentIdx = PROJECT_STAGES.indexOf(project.stage);
+
+  const saveProject = useSaveProject();
+  const role = useAuthStore((s) => s.user?.role);
+  const canMoveStage = canCreate(role, "project");
+
+  const moveToStage = async (target: ProjectStage) => {
+    if (target === project.stage || saveProject.isPending) return;
+    try {
+      await saveProject.mutateAsync({ id: project.id, body: { stage: target } });
+      toast.success("Stage updated", `${project.projectNumber} → ${target}`);
+    } catch (err) {
+      toast.error(
+        "Couldn't update stage",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    }
+  };
 
   return (
     <>
@@ -461,19 +504,34 @@ function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; e
           {PROJECT_STAGES.map((s, i) => {
             const done = i < currentIdx;
             const isCurrent = i === currentIdx;
+            const node = (
+              <div
+                className={cn(
+                  "flex size-5 items-center justify-center rounded-full border text-[9px] font-semibold tabular transition-colors",
+                  done && "border-success bg-success text-white",
+                  isCurrent && "border-primary bg-primary text-primary-foreground",
+                  !done && !isCurrent && "border-border bg-surface text-muted-foreground",
+                  canMoveStage && !isCurrent && "cursor-pointer hover:border-primary hover:ring-2 hover:ring-primary/30",
+                )}
+              >
+                {done ? <Check className="size-3" /> : i + 1}
+              </div>
+            );
             return (
               <React.Fragment key={s}>
-                <div className="flex flex-col items-center" title={s}>
-                  <div
-                    className={cn(
-                      "flex size-5 items-center justify-center rounded-full border text-[9px] font-semibold tabular transition-colors",
-                      done && "border-success bg-success text-white",
-                      isCurrent && "border-primary bg-primary text-primary-foreground",
-                      !done && !isCurrent && "border-border bg-surface text-muted-foreground",
-                    )}
-                  >
-                    {done ? <Check className="size-3" /> : i + 1}
-                  </div>
+                <div className="flex flex-col items-center" title={canMoveStage ? `Move to ${s}` : s}>
+                  {canMoveStage ? (
+                    <button
+                      type="button"
+                      onClick={() => moveToStage(s)}
+                      disabled={saveProject.isPending || isCurrent}
+                      aria-label={`Move to ${s}`}
+                    >
+                      {node}
+                    </button>
+                  ) : (
+                    node
+                  )}
                 </div>
                 {i < PROJECT_STAGES.length - 1 && (
                   <div
@@ -487,10 +545,33 @@ function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; e
             );
           })}
         </div>
-        <p className="mt-2 text-2xs text-muted-foreground">
-          Stage {currentIdx + 1} of {PROJECT_STAGES.length} ·{" "}
-          <span className="text-foreground">{project.stage}</span>
-        </p>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-2xs text-muted-foreground">
+            Stage {currentIdx + 1} of {PROJECT_STAGES.length} ·{" "}
+            <span className="text-foreground">{project.stage}</span>
+          </p>
+          {canMoveStage && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="xs"
+                variant="outline"
+                className="gap-1"
+                disabled={currentIdx <= 0 || saveProject.isPending}
+                onClick={() => moveToStage(PROJECT_STAGES[currentIdx - 1])}
+              >
+                <ChevronLeft className="size-3" /> Back
+              </Button>
+              <Button
+                size="xs"
+                className="gap-1"
+                disabled={currentIdx >= PROJECT_STAGES.length - 1 || saveProject.isPending}
+                onClick={() => moveToStage(PROJECT_STAGES[currentIdx + 1])}
+              >
+                Advance <ChevronRight className="size-3" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
@@ -546,16 +627,16 @@ function ProjectDrawerBody({ project, engineer, onClose }: { project: Product; e
             <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
               <Avatar className="size-9">
                 <AvatarFallback
-                  style={{ background: `hsl(${engineer?.hue} 55% 22%)`, color: `hsl(${engineer?.hue} 80% 76%)` }}
+                  style={{ background: `hsl(${engineer?.hue ?? 220} 55% 22%)`, color: `hsl(${engineer?.hue ?? 220} 80% 76%)` }}
                 >
-                  {engineer?.initials}
+                  {engineer?.initials ?? "?"}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 text-[13px] font-medium">
-                  <UserIcon className="size-3 text-muted-foreground" /> {engineer?.name}
+                  <UserIcon className="size-3 text-muted-foreground" /> {engineer?.name ?? "Unassigned"}
                 </p>
-                <p className="text-2xs text-muted-foreground">{engineer?.role} · Lead engineer</p>
+                <p className="text-2xs text-muted-foreground">Lead engineer</p>
               </div>
               <div className="text-right">
                 <p className="flex items-center justify-end gap-1 text-2xs text-muted-foreground">

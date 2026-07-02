@@ -127,6 +127,10 @@ export interface ApiPart {
   compliance: ComplianceFlag[];
   tags: string[];
   owner_id: UUID | null;
+  // Inline owner attribution (detail responses only). null if user deleted.
+  owner_name?: string | null;
+  owner_initials?: string | null;
+  owner_hue?: number | null;
   thumbnail_hue: number;
   where_used_count: number;
   created_at: ISO;
@@ -215,6 +219,13 @@ export interface ApiProject {
   quoted_price: Num;
   margin_pct?: Num;
   owner_id: UUID | null;
+  // Inline attribution (detail responses only). null if user deleted.
+  owner_name?: string | null;
+  owner_initials?: string | null;
+  owner_hue?: number | null;
+  engineer_name?: string | null;
+  engineer_initials?: string | null;
+  engineer_hue?: number | null;
   thumbnail_hue: number;
   health?: number;
   created_at: ISO;
@@ -235,6 +246,10 @@ export interface ApiBom {
   critical_items: number;
   long_lead_items: number;
   owner_id: UUID | null;
+  // Inline owner attribution (detail responses only). null if user deleted.
+  owner_name?: string | null;
+  owner_initials?: string | null;
+  owner_hue?: number | null;
   created_at: ISO;
   updated_at: ISO;
 }
@@ -270,6 +285,10 @@ export interface ApiBomAudit {
   comment: string;
   user_id: UUID;
   created_at: ISO;
+  // Inline user attribution (detail/transition responses). null if user deleted.
+  user_name?: string | null;
+  user_initials?: string | null;
+  user_hue?: number | null;
 }
 export interface ApiBomDetail extends ApiBom {
   lines: ApiBomLine[];
@@ -306,6 +325,10 @@ export interface ApiRfq {
   quotes_expected: number;
   vendor_ids: UUID[];
   owner_id: UUID | null;
+  // Inline owner attribution (detail responses only). null if user deleted.
+  owner_name?: string | null;
+  owner_initials?: string | null;
+  owner_hue?: number | null;
   created_at: ISO;
 }
 export interface ApiRfqLine { id: UUID; rfq_id: UUID; part_id: UUID; part_number: string; name: string; quantity: Num; specification: string; buying_notes: string }
@@ -345,6 +368,10 @@ export interface ApiPurchaseOrder {
   expected_date: ISO | null;
   received_pct: Num;
   owner_id: UUID | null;
+  // Inline owner attribution (detail responses only). null if user deleted.
+  owner_name?: string | null;
+  owner_initials?: string | null;
+  owner_hue?: number | null;
   on_time_risk?: "Low" | "Medium" | "High";
 }
 export interface ApiPoLine { id: UUID; po_id: UUID; part_id: UUID; part_number: string; name: string; quantity: Num; unit_price: Num; extended: Num; received_qty: Num; rejected_qty: Num }
@@ -392,6 +419,10 @@ export interface ApiMovement {
   reference_id: UUID | null;
   note: string | null;
   user_id: UUID | null;
+  // Inline user attribution (movements list). null if user deleted.
+  user_name?: string | null;
+  user_initials?: string | null;
+  user_hue?: number | null;
   created_at: ISO;
 }
 

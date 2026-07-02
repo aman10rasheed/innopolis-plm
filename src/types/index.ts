@@ -121,6 +121,11 @@ export interface Product {
   openEcos: number; // open BOM approvals / changes
   releaseDate: string; // enquiry date
   ownerId: string;
+  /** Inline attribution from the API (detail responses; null if user deleted). */
+  ownerName?: string | null;
+  engineerName?: string | null;
+  engineerInitials?: string | null;
+  engineerHue?: number | null;
   thumbnailHue: number;
   health: number; // 0-100
   category: string;
@@ -391,6 +396,10 @@ export interface BomAuditEntry {
   userId: string;
   date: string;
   comment: string;
+  /** Inline user attribution returned by the API (null if user deleted). */
+  userName?: string | null;
+  userInitials?: string | null;
+  userHue?: number | null;
 }
 
 export interface ProjectBom {
@@ -409,6 +418,10 @@ export interface ProjectBom {
   criticalItems: number;
   longLeadItems: number;
   ownerId: string;
+  /** Inline owner attribution from the API (detail responses; null if deleted). */
+  ownerName?: string | null;
+  ownerInitials?: string | null;
+  ownerHue?: number | null;
   createdAt: string;
   updatedAt: string;
   audit: BomAuditEntry[];

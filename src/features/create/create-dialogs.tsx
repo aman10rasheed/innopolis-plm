@@ -201,7 +201,6 @@ const productSchema = z.object({
   lifecycle: z.string().min(1),
   version: z.string().min(1),
   revision: z.string().min(1),
-  unitCost: z.coerce.number().min(0),
   targetCost: z.coerce.number().min(0),
   msrp: z.coerce.number().min(0),
   description: z.string().optional(),
@@ -228,19 +227,27 @@ export function CreateProductDialog({ open, onOpenChange }: { open: boolean; onO
         lifecycle: "In Design",
         version: "1.0",
         revision: "A",
-        unitCost: 1200000,
         targetCost: 1000000,
         msrp: 1800000,
         description: "",
       }}
       buildAndPersist={async (v) => {
-        await createProject.mutateAsync({
+        const category = PROJECT_FAMILIES.find((f) => f.family === v.family)?.category;
+        const created = await createProject.mutateAsync({
           name: v.name,
           customer: v.customer,
           family: v.family,
+          ...(category ? { category } : {}),
+          description: v.description || undefined,
+          lifecycle: v.lifecycle,
+          revision: `Rev ${v.revision}`,
+          version: v.version,
           target_cost: v.targetCost,
+          quoted_price: v.msrp,
         });
-        return `${v.code} · ${v.name}`;
+        // The server assigns the real project number — show it, not the preview.
+        const number = (created as { project_number?: string })?.project_number ?? v.name;
+        return `${number} · ${v.name}`;
       }}
     >
       {({ register, control, setValue, formState: { errors } }) => (
@@ -264,7 +271,7 @@ export function CreateProductDialog({ open, onOpenChange }: { open: boolean; onO
                 )} />
               </Field>
               <Field label="Project number">
-                <Input className="font-mono" {...register("code")} />
+                <Input className="font-mono" value="Assigned on save" disabled readOnly />
               </Field>
               <Field label="Lifecycle">
                 <Sel control={control} name="lifecycle" options={LIFECYCLES.map((l) => ({ value: l, label: l }))} />
@@ -278,17 +285,17 @@ export function CreateProductDialog({ open, onOpenChange }: { open: boolean; onO
             </div>
           </Section>
           <Section title="Cost targets">
-            <div className="grid grid-cols-3 gap-4">
-              <Field label="Unit cost" error={errors.unitCost?.message as string}>
-                <Input type="number" {...register("unitCost")} />
-              </Field>
+            <div className="grid grid-cols-2 gap-4">
               <Field label="Target cost">
                 <Input type="number" {...register("targetCost")} />
               </Field>
-              <Field label="MSRP">
+              <Field label="Quoted price (MSRP)">
                 <Input type="number" {...register("msrp")} />
               </Field>
             </div>
+            <p className="mt-2 text-2xs text-muted-foreground">
+              Estimated cost is rolled up from the project BOM once components are added.
+            </p>
           </Section>
           <Section title="Description">
             <Textarea rows={2} placeholder="Optional product summary" {...register("description")} />

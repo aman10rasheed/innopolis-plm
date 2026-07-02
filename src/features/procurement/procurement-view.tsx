@@ -17,15 +17,17 @@ import {
   Plus,
   PackageCheck,
   Send,
+  ShoppingCart,
 } from "lucide-react";
 import {
   useRfqs,
   useRfq,
-  useRfqQuotations,
+  useComparison,
   useCreateRfq,
   useSendRfq,
   useAddQuotation,
   useAwardQuotation,
+  useCreatePo,
   usePurchaseOrders,
   usePurchaseOrder,
   useSetPoStatus,
@@ -132,6 +134,7 @@ export function ProcurementView() {
         <ComparisonTab
           selectedRfqId={selectedRfqId}
           setSelectedRfqId={setSelectedRfqId}
+          onCreatedPo={() => setTab("pos")}
         />
       </TabsContent>
       <TabsContent value="pos" className="min-h-0 flex-1 overflow-hidden">
@@ -643,9 +646,11 @@ function GenerateRfqDialog({
 function ComparisonTab({
   selectedRfqId,
   setSelectedRfqId,
+  onCreatedPo,
 }: {
   selectedRfqId: string | null;
   setSelectedRfqId: (id: string) => void;
+  onCreatedPo: () => void;
 }) {
   const q = useRfqs();
   const rfqs = q.data?.items ?? [];
@@ -720,7 +725,7 @@ function ComparisonTab({
 
           {/* Comparison grid */}
           <div className="min-w-0 flex-1">
-            {activeRfq && <ComparisonGrid rfq={activeRfq} />}
+            {activeRfq && <ComparisonGrid rfq={activeRfq} onCreatedPo={onCreatedPo} />}
           </div>
         </div>
       )}
@@ -734,12 +739,13 @@ interface CmpRow {
   best?: (q: Quotation, quotes: Quotation[]) => boolean;
 }
 
-function ComparisonGrid({ rfq }: { rfq: Rfq }) {
-  const qq = useRfqQuotations(rfq.id);
+function ComparisonGrid({ rfq, onCreatedPo }: { rfq: Rfq; onCreatedPo: () => void }) {
+  const qq = useComparison(rfq.id);
   const awardMut = useAwardQuotation();
+  const createPoMut = useCreatePo();
 
   const quotes = React.useMemo(
-    () => [...(qq.data ?? [])].sort((a, b) => a.rank - b.rank),
+    () => [...(qq.data?.quotations ?? [])].sort((a, b) => a.rank - b.rank),
     [qq.data],
   );
 
@@ -750,6 +756,22 @@ function ComparisonGrid({ rfq }: { rfq: Rfq }) {
     } catch (err) {
       toast.error(
         "Could not award quotation",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    }
+  };
+
+  const createPo = async (quote: Quotation) => {
+    try {
+      const po = await createPoMut.mutateAsync({ from_quotation_id: quote.id });
+      toast.success(
+        "Purchase order drafted",
+        `${po.number} · ${quote.vendorName} — from ${quote.rfqNumber}`,
+      );
+      onCreatedPo();
+    } catch (err) {
+      toast.error(
+        "Could not create PO",
         err instanceof Error ? err.message : "Please try again.",
       );
     }
@@ -771,7 +793,13 @@ function ComparisonGrid({ rfq }: { rfq: Rfq }) {
           />
         </div>
       ) : (
-        <ComparisonGridInner rfq={rfq} quotes={quotes} onAward={award} />
+        <ComparisonGridInner
+          rfq={rfq}
+          quotes={quotes}
+          onAward={award}
+          onCreatePo={createPo}
+          isCreatingPo={createPoMut.isPending}
+        />
       )}
     </QueryBoundary>
   );
@@ -781,10 +809,14 @@ function ComparisonGridInner({
   rfq,
   quotes,
   onAward,
+  onCreatePo,
+  isCreatingPo,
 }: {
   rfq: Rfq;
   quotes: Quotation[];
   onAward: (q: Quotation) => void;
+  onCreatePo: (q: Quotation) => void;
+  isCreatingPo: boolean;
 }) {
   const minTotal = Math.min(...quotes.map((q) => q.totalValue));
   const maxTotal = Math.max(...quotes.map((q) => q.totalValue));
@@ -927,14 +959,30 @@ function ComparisonGridInner({
                     recommended ? "bg-primary/[0.04]" : "bg-surface/20",
                   )}
                 >
-                  <Button
-                    size="xs"
-                    variant={recommended ? "default" : "outline"}
-                    className="w-full"
-                    onClick={() => onAward(q)}
-                  >
-                    Award
-                  </Button>
+                  {q.status === "Awarded" ? (
+                    <Button
+                      size="xs"
+                      variant="default"
+                      className="w-full gap-1.5"
+                      onClick={() => onCreatePo(q)}
+                      disabled={isCreatingPo}
+                    >
+                      <ShoppingCart className="size-3" /> Create PO
+                    </Button>
+                  ) : q.status === "Rejected" ? (
+                    <Button size="xs" variant="ghost" className="w-full" disabled>
+                      Not selected
+                    </Button>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant={recommended ? "default" : "outline"}
+                      className="w-full"
+                      onClick={() => onAward(q)}
+                    >
+                      Award
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -957,11 +1005,15 @@ const RISK_VARIANT: Record<"Low" | "Medium" | "High", "muted" | "warning" | "des
   High: "destructive",
 };
 
-/** The next status a PO can be advanced to in the approval / fulfilment flow. */
+/** The next status a PO can be advanced to via the /status pipeline.
+ * `Received` / `Partially Received` are receipt-derived and set ONLY by the
+ * goods-receipt endpoint — never via /status (backend rejects them with 400).
+ * From `Open`/`Partially Received`, receive goods; `Partially Received` may
+ * also be short-closed to `Closed`. */
 const NEXT_PO_STATUS: Partial<Record<PoStatus, PoStatus>> = {
   Draft: "Pending Approval",
   "Pending Approval": "Open",
-  "Partially Received": "Received",
+  "Partially Received": "Closed",
   Received: "Closed",
 };
 

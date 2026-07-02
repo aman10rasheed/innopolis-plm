@@ -18,7 +18,6 @@ import {
 import {
   useBoms,
   useBom,
-  useUsers,
   useCreateBom,
   useUpdateBom,
   useDeleteBom,
@@ -26,7 +25,6 @@ import {
 } from "@/lib/api";
 import { BOM_STAGES } from "@/types";
 import type { ProjectBom, BomStage } from "@/types";
-import type { ApiUserFull } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +52,6 @@ const REVS = ["A", "B", "C", "D"];
 
 export function BomApprovalsBoard() {
   const bomsQuery = useBoms();
-  const usersQuery = useUsers();
 
   return (
     <QueryBoundary
@@ -63,25 +60,16 @@ export function BomApprovalsBoard() {
       error={bomsQuery.error}
       onRetry={() => bomsQuery.refetch()}
     >
-      <Board
-        boms={bomsQuery.data?.items ?? []}
-        users={usersQuery.data?.items ?? []}
-      />
+      <Board boms={bomsQuery.data?.items ?? []} />
     </QueryBoundary>
   );
 }
 
-function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
+function Board({ boms }: { boms: ProjectBom[] }) {
   const typeFilter = useUIStore((s) => s.boardFilters["bomApprovals"] ?? "");
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [overCol, setOverCol] = React.useState<BomStage | null>(null);
   const [editId, setEditId] = React.useState<string | null>(null);
-
-  const userById = React.useMemo(() => {
-    const m = new Map<string, ApiUserFull>();
-    for (const u of users) m.set(u.id, u);
-    return m;
-  }, [users]);
 
   const createBom = useCreateBom();
   const updateBom = useUpdateBom();
@@ -187,7 +175,6 @@ function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
               <div className="flex-1 space-y-2 overflow-y-auto p-2">
                 <AnimatePresence initial={false}>
                   {items.map((b) => {
-                    const owner = userById.get(b.ownerId);
                     return (
                       <ContextMenu key={b.id}>
                         <ContextMenuTrigger asChild>
@@ -220,7 +207,9 @@ function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
                               <span className="text-[13px] font-semibold tabular text-primary">{formatCompactCurrency(b.totalValue)}</span>
                               <div className="flex items-center gap-1.5">
                                 <span className="text-2xs text-muted-foreground">{b.audit.length} steps</span>
-                                <Avatar className="size-5"><AvatarFallback className="text-[8px]" style={{ background: `hsl(${owner?.hue} 55% 22%)`, color: `hsl(${owner?.hue} 80% 76%)` }}>{owner?.initials}</AvatarFallback></Avatar>
+                                {b.ownerInitials && (
+                                  <Avatar className="size-5"><AvatarFallback className="text-[8px]" style={{ background: `hsl(${b.ownerHue ?? 220} 55% 22%)`, color: `hsl(${b.ownerHue ?? 220} 80% 76%)` }}>{b.ownerInitials}</AvatarFallback></Avatar>
+                                )}
                               </div>
                             </div>
                           </motion.div>
@@ -257,7 +246,6 @@ function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
 
       <BomEditDrawer
         bom={editing}
-        userById={userById}
         onClose={() => setEditId(null)}
         onSave={(patch) => { if (editing) saveEdit(editing.id, patch); }}
         onMove={(stage) => editing && move(editing.id, stage)}
@@ -269,14 +257,12 @@ function Board({ boms, users }: { boms: ProjectBom[]; users: ApiUserFull[] }) {
 
 function BomEditDrawer({
   bom,
-  userById,
   onClose,
   onSave,
   onMove,
   onDelete,
 }: {
   bom: ProjectBom | null;
-  userById: Map<string, ApiUserFull>;
   onClose: () => void;
   onSave: (patch: { bom_type?: string; revision?: string }) => void;
   onMove: (stage: BomStage) => void;
@@ -286,6 +272,8 @@ function BomEditDrawer({
   React.useEffect(() => setForm(bom), [bom]);
 
   // The list endpoint omits audit — fetch the BOM detail for the trail.
+  // User attribution (name/initials/hue) is returned inline on each entry,
+  // so no separate (admin-only) users lookup is needed.
   const detailQ = useBom(bom?.id ?? "");
   const audit = React.useMemo(
     () =>
@@ -294,6 +282,9 @@ function BomEditDrawer({
         userId: a.user_id,
         date: a.created_at,
         comment: a.comment,
+        userName: a.user_name ?? null,
+        userInitials: a.user_initials ?? null,
+        userHue: a.user_hue ?? null,
       })),
     [detailQ.data],
   );
@@ -374,8 +365,8 @@ function BomEditDrawer({
                   <div className="relative space-y-0 pl-5">
                     <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
                     {audit.map((a, i) => {
-                      const user = userById.get(a.userId);
                       const isLast = i === audit.length - 1;
+                      const hue = a.userHue ?? 220;
                       return (
                         <div key={i} className="relative pb-4">
                           <div className={cn("absolute -left-5 top-1 flex size-3.5 items-center justify-center rounded-full border-2 border-surface", isLast ? "bg-primary" : "bg-success")}>
@@ -387,8 +378,8 @@ function BomEditDrawer({
                           </div>
                           <p className="mt-1 text-[13px]">{a.comment}</p>
                           <p className="mt-0.5 flex items-center gap-1.5 text-2xs text-muted-foreground">
-                            <Avatar className="size-4"><AvatarFallback className="text-[7px]" style={{ background: `hsl(${user?.hue} 55% 22%)`, color: `hsl(${user?.hue} 80% 76%)` }}>{user?.initials}</AvatarFallback></Avatar>
-                            {user?.name}
+                            <Avatar className="size-4"><AvatarFallback className="text-[7px]" style={{ background: `hsl(${hue} 55% 22%)`, color: `hsl(${hue} 80% 76%)` }}>{a.userInitials ?? "?"}</AvatarFallback></Avatar>
+                            {a.userName ?? "Unknown user"}
                           </p>
                         </div>
                       );

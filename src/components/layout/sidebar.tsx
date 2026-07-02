@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { navForRole, SETTINGS_ITEM } from "@/constants/navigation";
 import { useUIStore } from "@/stores/ui-store";
 import { useAuthStore } from "@/stores/auth-store";
+import { canCreate, type CreateAction } from "@/auth/permissions";
 import { Hint } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -140,18 +141,27 @@ export function Sidebar() {
 
 function NewMenu({ collapsed }: { collapsed: boolean }) {
   const router = useRouter();
+  const role = useAuthStore((s) => s.user?.role);
   const setCreatePartOpen = useUIStore((s) => s.setCreatePartOpen);
   const setCreateProductOpen = useUIStore((s) => s.setCreateProductOpen);
   const setCreateBomOpen = useUIStore((s) => s.setCreateBomOpen);
   const setCreatePoOpen = useUIStore((s) => s.setCreatePoOpen);
   const setCreateVendorOpen = useUIStore((s) => s.setCreateVendorOpen);
-  const createItems: [string, string, () => void][] = [
-    ["Material", "Add a material to the master", () => { router.push("/parts"); setCreatePartOpen(true); }],
-    ["Project", "Open a project from enquiry", () => setCreateProductOpen(true)],
-    ["Draft BOM", "Start a project BOM for approval", () => setCreateBomOpen(true)],
-    ["Purchase Order", "Draft a PO to a vendor", () => setCreatePoOpen(true)],
-    ["Vendor", "Register a new vendor", () => setCreateVendorOpen(true)],
+  const setCreateWarehouseOpen = useUIStore((s) => s.setCreateWarehouseOpen);
+  const setCreateCountOpen = useUIStore((s) => s.setCreateCountOpen);
+
+  // Each item is gated by the role's create permissions so the menu only lists
+  // actions this role can actually perform (click-time guard still applies).
+  const allItems: { label: string; desc: string; action: CreateAction; run: () => void }[] = [
+    { label: "Material", desc: "Add a material to the master", action: "material", run: () => { router.push("/parts"); setCreatePartOpen(true); } },
+    { label: "Project", desc: "Open a project from enquiry", action: "project", run: () => setCreateProductOpen(true) },
+    { label: "Draft BOM", desc: "Start a project BOM for approval", action: "bom", run: () => setCreateBomOpen(true) },
+    { label: "Purchase Order", desc: "Draft a PO to a vendor", action: "purchaseOrder", run: () => setCreatePoOpen(true) },
+    { label: "Vendor", desc: "Register a new vendor", action: "vendor", run: () => setCreateVendorOpen(true) },
+    { label: "Warehouse", desc: "Register a stocking location", action: "warehouse", run: () => { router.push("/inventory"); setCreateWarehouseOpen(true); } },
+    { label: "Stock Count", desc: "Schedule an inventory count", action: "stockCount", run: () => { router.push("/inventory"); setCreateCountOpen(true); } },
   ];
+  const createItems = allItems.filter((i) => canCreate(role, i.action));
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -170,10 +180,10 @@ function NewMenu({ collapsed }: { collapsed: boolean }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel>Create new</DropdownMenuLabel>
-        {createItems.map(([label, desc, action]) => (
+        {createItems.map(({ label, desc, run }) => (
           <DropdownMenuItem
             key={label}
-            onClick={action}
+            onClick={run}
             className="flex-col items-start gap-0"
           >
             <span className="text-sm font-medium">{label}</span>

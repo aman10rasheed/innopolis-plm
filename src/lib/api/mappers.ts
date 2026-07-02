@@ -93,6 +93,10 @@ export const mapProject = (p: ApiProject): Product => ({
   openEcos: 0,
   releaseDate: p.created_at,
   ownerId: p.owner_id ?? "",
+  ownerName: p.owner_name ?? null,
+  engineerName: p.engineer_name ?? null,
+  engineerInitials: p.engineer_initials ?? null,
+  engineerHue: p.engineer_hue ?? null,
   thumbnailHue: p.thumbnail_hue,
   health: p.health ?? 80,
   category: p.category,
@@ -114,10 +118,21 @@ export const mapBom = (b: ApiBom | ApiBomDetail): ProjectBom => ({
   criticalItems: b.critical_items,
   longLeadItems: b.long_lead_items,
   ownerId: b.owner_id ?? "",
+  ownerName: b.owner_name ?? null,
+  ownerInitials: b.owner_initials ?? null,
+  ownerHue: b.owner_hue ?? null,
   createdAt: b.created_at,
   updatedAt: b.updated_at,
   audit: ("audit" in b ? b.audit : []).map(
-    (a): BomAuditEntry => ({ stage: a.to_stage, userId: a.user_id, date: a.created_at, comment: a.comment }),
+    (a): BomAuditEntry => ({
+      stage: a.to_stage,
+      userId: a.user_id,
+      date: a.created_at,
+      comment: a.comment,
+      userName: a.user_name ?? null,
+      userInitials: a.user_initials ?? null,
+      userHue: a.user_hue ?? null,
+    }),
   ),
 });
 
