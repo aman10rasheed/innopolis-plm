@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Select,
@@ -264,7 +263,7 @@ function CategoriesTab() {
         </Button>
       </div>
 
-      <ScrollArea className="max-h-[42vh]">
+      <div className="max-h-[42vh] overflow-y-auto">
         <div className="p-2">
           <QueryBoundary
             isLoading={categoriesQuery.isLoading}
@@ -311,7 +310,7 @@ function CategoriesTab() {
             )}
           </QueryBoundary>
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="border-t border-border bg-surface-sunken/40 px-4 py-2.5">
         <span className="text-2xs text-muted-foreground">
@@ -433,7 +432,7 @@ function SubtypesTab() {
         </div>
       </div>
 
-      <ScrollArea className="max-h-[42vh]">
+      <div className="max-h-[42vh] overflow-y-auto">
         <div className="p-2">
           {!categoryId ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
@@ -481,7 +480,7 @@ function SubtypesTab() {
             </QueryBoundary>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="border-t border-border bg-surface-sunken/40 px-4 py-2.5">
         <span className="text-2xs text-muted-foreground">
@@ -631,7 +630,7 @@ function CodeLabelTab({
         </Button>
       </div>
 
-      <ScrollArea className="max-h-[42vh]">
+      <div className="max-h-[42vh] overflow-y-auto">
         <div className="p-2">
           <QueryBoundary
             isLoading={query.isLoading}
@@ -671,7 +670,7 @@ function CodeLabelTab({
             )}
           </QueryBoundary>
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="border-t border-border bg-surface-sunken/40 px-4 py-2.5">
         <span className="text-2xs text-muted-foreground">
