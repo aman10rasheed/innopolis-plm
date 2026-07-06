@@ -8,6 +8,7 @@ import {
   Building2,
   Pencil,
   Share2,
+  ReceiptText,
 } from "lucide-react";
 import type { Part } from "@/types";
 import { Thumbnail } from "@/components/shared/thumbnail";
@@ -15,10 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { LIFECYCLE_VARIANT, AVAILABILITY_VARIANT } from "@/constants/status";
+import { usePart, usePartPriceHistory, toNumber } from "@/lib/api";
 
-export function PartDetailDrawer({ part, supplierName, onClose, onEdit }: { part: Part | null; supplierName: (id: string) => string; onClose: () => void; onEdit?: (part: Part) => void }) {
+export function PartDetailDrawer({ part, onClose, onEdit }: { part: Part | null; onClose: () => void; onEdit?: (part: Part) => void }) {
   return (
     <AnimatePresence>
       {part && (
@@ -37,7 +39,7 @@ export function PartDetailDrawer({ part, supplierName, onClose, onEdit }: { part
             transition={{ type: "spring", stiffness: 360, damping: 36 }}
             className="fixed right-0 top-0 z-[141] flex h-full w-[480px] flex-col border-l border-border bg-surface-overlay shadow-lg"
           >
-            <PartDrawerBody part={part} supplierName={supplierName} onClose={onClose} onEdit={onEdit} />
+            <PartDrawerBody part={part} onClose={onClose} onEdit={onEdit} />
           </motion.aside>
         </>
       )}
@@ -45,8 +47,11 @@ export function PartDetailDrawer({ part, supplierName, onClose, onEdit }: { part
   );
 }
 
-function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; supplierName: (id: string) => string; onClose: () => void; onEdit?: (part: Part) => void }) {
-  const supplier = supplierName(part.supplierId);
+function PartDrawerBody({ part, onClose, onEdit }: { part: Part; onClose: () => void; onEdit?: (part: Part) => void }) {
+  // Vendors / resource specs / last-purchase attribution only come on the
+  // single-material read — list rows don't carry them.
+  const detailQ = usePart(part.id);
+  const detail = detailQ.data ?? part;
 
   return (
     <>
@@ -87,8 +92,8 @@ function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; s
           <TabsList className="h-8 bg-transparent p-0">
             {[
               ["overview", "Overview"],
+              ["pricing", "Pricing"],
               ["usage", "Where Used"],
-              ["revisions", "Revisions"],
               ["docs", "Documents"],
             ].map(([v, l]) => (
               <TabsTrigger key={v} value={v} className="h-8 rounded-none border-b-2 border-transparent px-2.5 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
@@ -119,22 +124,47 @@ function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; s
             </div>
 
             <div className="mt-4">
-              <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Description</p>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{part.description}</p>
+              <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Remarks</p>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{detail.remarks || "—"}</p>
             </div>
 
-            <div className="mt-4 flex items-center justify-between rounded-xl border border-border bg-surface p-3">
-              <div className="flex items-center gap-2.5">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Building2 className="size-4" />
+            {/* Preferred vendors (many-to-many) */}
+            <div className="mt-4 rounded-xl border border-border bg-surface p-3">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Building2 className="size-3.5" /> Preferred vendors
+                </p>
+                <Badge variant={AVAILABILITY_VARIANT[part.availability]}>{part.availability}</Badge>
+              </div>
+              {detailQ.isLoading ? (
+                <p className="mt-2 text-2xs text-muted-foreground">Loading vendors…</p>
+              ) : detail.preferredVendors.length === 0 ? (
+                <p className="mt-2 text-[13px] text-muted-foreground">No preferred vendors set.</p>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {detail.preferredVendors.map((v) => (
+                    <span key={v.id} className="rounded-md border border-border bg-surface-sunken px-2 py-1 text-xs font-medium">
+                      {v.name} <span className="text-muted-foreground">· {v.country}</span>
+                    </span>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-[13px] font-medium">{supplier || "—"}</p>
-                  <p className="text-2xs text-muted-foreground">MPN {part.manufacturerPartNumber}</p>
+              )}
+              <p className="mt-2 text-2xs text-muted-foreground">MPN {part.manufacturerPartNumber || "—"}</p>
+            </div>
+
+            {/* Resource specs */}
+            {detail.resourceSpecs.length > 0 && (
+              <div className="mt-4">
+                <p className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">Resource specifications</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {detail.resourceSpecs.map((r) => (
+                    <Badge key={r.id} variant="outline" title={r.description}>
+                      <span className="font-mono">{r.code}</span>&nbsp;{r.name}
+                    </Badge>
+                  ))}
                 </div>
               </div>
-              <Badge variant={AVAILABILITY_VARIANT[part.availability]}>{part.availability}</Badge>
-            </div>
+            )}
 
             {part.compliance.length > 0 && (
               <div className="mt-4">
@@ -158,6 +188,10 @@ function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; s
             )}
           </TabsContent>
 
+          <TabsContent value="pricing" className="m-0 p-4">
+            <PricingTab partId={part.id} />
+          </TabsContent>
+
           <TabsContent value="usage" className="m-0 p-4">
             {/* The where-used detail list has no dedicated API endpoint in the
                 current contract; the material carries an aggregate usage count. */}
@@ -170,17 +204,64 @@ function PartDrawerBody({ part, supplierName, onClose, onEdit }: { part: Part; s
             )}
           </TabsContent>
 
-          <TabsContent value="revisions" className="m-0 p-4">
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Current revision <span className="font-mono">{part.revision}</span> · full revision history is not exposed by the API.
-            </p>
-          </TabsContent>
-
           <TabsContent value="docs" className="m-0 p-4">
             <p className="py-8 text-center text-sm text-muted-foreground">No linked documents.</p>
           </TabsContent>
         </ScrollArea>
       </Tabs>
+    </>
+  );
+}
+
+/**
+ * Purchase-price ledger: the last purchase (price · date · vendor) plus the
+ * full history from GET /parts/:id/price-history. `last_purchase_price` is
+ * system-maintained — every goods receipt appends a Purchase row.
+ */
+function PricingTab({ partId }: { partId: string }) {
+  const q = usePartPriceHistory(partId);
+  const data = q.data;
+
+  if (q.isLoading) return <p className="py-8 text-center text-sm text-muted-foreground">Loading price history…</p>;
+  if (q.isError || !data) return <p className="py-8 text-center text-sm text-muted-foreground">Price history unavailable.</p>;
+
+  return (
+    <>
+      <div className="rounded-xl border border-primary/25 bg-primary/[0.05] p-3">
+        <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-primary">
+          <ReceiptText className="size-3.5" /> Last purchase (system-maintained)
+        </p>
+        <p className="mt-1 text-lg font-semibold tabular">{formatCurrency(toNumber(data.last_purchase_price))}</p>
+        <p className="text-2xs text-muted-foreground">
+          {data.last_purchase_date ? formatDate(data.last_purchase_date) : "No purchases yet"}
+          {data.last_purchase_vendor ? ` · from ${data.last_purchase_vendor.name}` : " · manual opening value"}
+        </p>
+      </div>
+
+      {data.history.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">No price events recorded.</p>
+      ) : (
+        <div className="mt-4 overflow-hidden rounded-xl border border-border">
+          <div className="grid grid-cols-[0.9fr_0.8fr_1.1fr_0.6fr_0.9fr] items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <span>Price</span>
+            <span>Source</span>
+            <span>Reference</span>
+            <span className="text-right">Qty</span>
+            <span className="text-right">Date</span>
+          </div>
+          <div className="divide-y divide-border">
+            {data.history.map((h, i) => (
+              <div key={i} className="grid grid-cols-[0.9fr_0.8fr_1.1fr_0.6fr_0.9fr] items-center gap-2 px-3 py-2 text-[13px]">
+                <span className="font-medium tabular">{formatCurrency(toNumber(h.unit_price))}</span>
+                <Badge variant={h.source === "Purchase" ? "default" : "muted"} className="w-fit">{h.source}</Badge>
+                <span className="truncate font-mono text-2xs text-muted-foreground">{h.reference}</span>
+                <span className="text-right tabular text-muted-foreground">{toNumber(h.quantity) || "—"}</span>
+                <span className="text-right text-2xs text-muted-foreground">{formatDate(h.effective_date, { month: "short", day: "numeric" })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

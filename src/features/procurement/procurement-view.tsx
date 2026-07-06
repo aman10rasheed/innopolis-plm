@@ -1384,7 +1384,7 @@ function ReceiveGoodsDialog({
             <div className="grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.9fr] items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
               <span>Material</span>
               <span className="text-right">Open</span>
-              <span className="text-right">Receive</span>
+              <span className="text-right">Accept</span>
               <span className="text-right">Reject</span>
               <span>Batch</span>
             </div>
@@ -1428,7 +1428,7 @@ function ReceiveGoodsDialog({
             </div>
           </div>
           <p className="text-2xs text-muted-foreground">
-            Receive + reject cannot exceed the open quantity per line. Rejected units are not booked into stock.
+            Accept + reject cannot exceed the open quantity per line. Only accepted units enter stock; rejected units are recorded on the movement.
           </p>
         </div>
 

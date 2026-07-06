@@ -23,6 +23,7 @@ export const ROLE_VARIANT: Record<Role, "default" | "info" | "warning" | "succes
   Purchase: "info",
   Stores: "success",
   Management: "muted",
+  "Project Manager": "success",
 };
 
 export const TEAM_BY_ROLE: Record<Role, string> = {
@@ -32,6 +33,7 @@ export const TEAM_BY_ROLE: Record<Role, string> = {
   Purchase: "Procurement",
   Stores: "Stores & Inventory",
   Management: "Management",
+  "Project Manager": "Projects",
 };
 
 export function initialsOf(name: string) {

@@ -6,8 +6,8 @@
 import { req, reqList, API_BASE, type Query } from "./client";
 import type {
   ApiAuthResponse, ApiUser, ApiUserFull, ApiCreateUserInput, ApiResetPasswordResponse,
-  ApiCategory, ApiSubtype, ApiMajorSpec, ApiGrade, ApiUnit,
-  ApiPart, ApiPartInput,
+  ApiCategory, ApiSubtype, ApiMajorSpec, ApiGrade, ApiUnit, ApiResourceSpec,
+  ApiPart, ApiPartInput, ApiPriceHistory,
   ApiSupplier,
   ApiProject,
   ApiBom, ApiBomDetail, ApiBomLine, ApiBomLineInput, ApiBomAnalysis,
@@ -16,7 +16,7 @@ import type {
   ApiWarehouse, ApiWarehouseDetail, ApiInventoryBalance, ApiMovement,
   ApiDashboard,
 } from "./types";
-import type { BomStage, PoStatus } from "@/types";
+import type { BomStage, PoStatus, ProjectStage } from "@/types";
 
 export const api = {
   auth: {
@@ -70,6 +70,13 @@ export const api = {
     createUnit: (body: Partial<ApiUnit>) => req<ApiUnit>("/units", { method: "POST", body }),
     updateUnit: (id: string, body: Partial<ApiUnit>) => req<ApiUnit>(`/units/${id}`, { method: "PATCH", body }),
     deleteUnit: (id: string) => req<void>(`/units/${id}`, { method: "DELETE" }),
+
+    resourceSpecs: () => req<ApiResourceSpec[]>("/resource-specs"),
+    getResourceSpec: (id: string) => req<ApiResourceSpec>(`/resource-specs/${id}`),
+    createResourceSpec: (body: Partial<ApiResourceSpec>) => req<ApiResourceSpec>("/resource-specs", { method: "POST", body }),
+    updateResourceSpec: (id: string, body: Partial<ApiResourceSpec>) => req<ApiResourceSpec>(`/resource-specs/${id}`, { method: "PATCH", body }),
+    /** 409 if the spec is still assigned to any material. */
+    deleteResourceSpec: (id: string) => req<void>(`/resource-specs/${id}`, { method: "DELETE" }),
   },
 
   /* ---- Module 1: Materials ---- */
@@ -79,6 +86,8 @@ export const api = {
     create: (body: ApiPartInput) => req<ApiPart>("/parts", { method: "POST", body }),
     update: (id: string, body: Partial<ApiPartInput>) => req<ApiPart>(`/parts/${id}`, { method: "PATCH", body }),
     remove: (id: string) => req<void>(`/parts/${id}`, { method: "DELETE" }),
+    /** Purchase-price ledger (newest first). */
+    priceHistory: (id: string) => req<ApiPriceHistory>(`/parts/${id}/price-history`),
   },
 
   /* ---- Module 3: Vendors ---- */
@@ -97,6 +106,9 @@ export const api = {
     create: (body: Partial<ApiProject>) => req<ApiProject>("/projects", { method: "POST", body }),
     update: (id: string, body: Partial<ApiProject>) => req<ApiProject>(`/projects/${id}`, { method: "PATCH", body }),
     remove: (id: string) => req<void>(`/projects/${id}`, { method: "DELETE" }),
+    /** Project coordination (roles: Project Manager on own projects, Engineering). */
+    setStage: (id: string, stage: ProjectStage) =>
+      req<ApiProject>(`/projects/${id}/stage`, { method: "PATCH", body: { stage } }),
   },
 
   /* ---- Module 2: BOMs ---- */
@@ -114,6 +126,9 @@ export const api = {
     updateLine: (lineId: string, body: Partial<ApiBomLineInput>) =>
       req<ApiBomLine>(`/bom-lines/${lineId}`, { method: "PATCH", body }),
     deleteLine: (lineId: string) => req<void>(`/bom-lines/${lineId}`, { method: "DELETE" }),
+    /** PM planning date — allowed at any BOM stage (roles: Project Manager, Engineering). */
+    setLineRequiredDate: (lineId: string, required_by_date: string | null) =>
+      req<ApiBomLine>(`/bom-lines/${lineId}/required-date`, { method: "PATCH", body: { required_by_date } }),
     transition: (id: string, action: "advance" | "reject", comment = "") =>
       req<ApiBomDetail>(`/project-boms/${id}/transition`, { method: "POST", body: { action, comment } }),
     analysis: (id: string, groupBy: "category" | "vendor" | "leadtime" | "procurement") =>
@@ -145,7 +160,8 @@ export const api = {
     create: (body: Record<string, unknown>) => req<ApiPurchaseOrder>("/purchase-orders", { method: "POST", body }),
     setStatus: (id: string, status: PoStatus) =>
       req<ApiPurchaseOrder>(`/purchase-orders/${id}/status`, { method: "POST", body: { status } }),
-    receive: (id: string, body: { warehouse_id?: string; lines: { po_line_id: string; received_qty: number; rejected_qty?: number; batch?: string }[] }) =>
+    /** Goods receipt. warehouse_id REQUIRED; received_qty is GROSS (accepted + rejected). */
+    receive: (id: string, body: { warehouse_id: string; lines: { po_line_id: string; received_qty: number; rejected_qty?: number; batch?: string }[] }) =>
       req<ApiPoDetail>(`/purchase-orders/${id}/receive`, { method: "POST", body }),
     remove: (id: string) => req<void>(`/purchase-orders/${id}`, { method: "DELETE" }),
   },

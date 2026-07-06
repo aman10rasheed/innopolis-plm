@@ -148,15 +148,7 @@ export function PartsTable() {
   const data = React.useMemo(() => partsQuery.data?.items ?? [], [partsQuery.data]);
   const vendors = vendorsQuery.data?.items ?? [];
 
-  // Vendor-name lookup replaces the mock `getSupplier` selector.
-  const supplierMap = React.useMemo(() => {
-    const m = new Map<string, string>();
-    for (const v of vendors) m.set(v.id, v.name);
-    return m;
-  }, [vendors]);
-  const supplierName = React.useCallback((id: string) => supplierMap.get(id) ?? "", [supplierMap]);
-
-  const columns = React.useMemo(() => makePartColumns(supplierName), [supplierName]);
+  const columns = React.useMemo(() => makePartColumns(), []);
 
   // Facet options derived from the loaded data.
   const CATEGORIES = React.useMemo(() => [...new Set(data.map((p) => p.category))], [data]);
@@ -249,7 +241,7 @@ export function PartsTable() {
         { header: "Sourcing", value: (p) => p.sourcing },
         { header: "Unit Cost", value: (p) => p.unitCost },
         { header: "Lead Time (days)", value: (p) => p.leadTimeDays },
-        { header: "Vendor", value: (p) => supplierName(p.supplierId) },
+        { header: "Remarks", value: (p) => p.remarks },
         { header: "Stock Qty", value: (p) => p.stockQty },
         { header: "UoM", value: (p) => p.uom },
       ],
@@ -529,7 +521,6 @@ export function PartsTable() {
 
       <PartDetailDrawer
         part={activePart}
-        supplierName={supplierName}
         onClose={() => setActivePart(null)}
         onEdit={(part) => {
           setActivePart(null);

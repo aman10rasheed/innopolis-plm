@@ -41,6 +41,9 @@ import {
   useUnits,
   useSaveUnit,
   useDeleteUnit,
+  useResourceSpecs,
+  useSaveResourceSpec,
+  useDeleteResourceSpec,
   ApiError,
 } from "@/lib/api";
 import type {
@@ -85,6 +88,7 @@ export function CategoryManagerDialog({
               <TabsTrigger value="major-specs">Major Specs</TabsTrigger>
               <TabsTrigger value="grades">Grades</TabsTrigger>
               <TabsTrigger value="units">Units</TabsTrigger>
+              <TabsTrigger value="resource-specs">Resource Specs</TabsTrigger>
             </TabsList>
           </div>
 
@@ -128,6 +132,20 @@ export function CategoryManagerDialog({
               codeMono
               valueLabel="Name"
               valuePlaceholder="e.g. Numbers"
+            />
+          </TabsContent>
+          <TabsContent value="resource-specs" className="mt-0">
+            {/* Delete returns 409 while the spec is assigned to materials —
+                the server message (with the count) surfaces in the error toast. */}
+            <CodeLabelTab
+              kind="resourceSpec"
+              title="resource spec"
+              titlePlural="resource specs"
+              codeLabel="Code"
+              codePlaceholder="RS-STD"
+              codeMono
+              valueLabel="Name"
+              valuePlaceholder="e.g. Standard"
             />
           </TabsContent>
         </Tabs>
@@ -502,17 +520,32 @@ function valueOf(row: CodeValueRow): string {
   return "label" in row ? row.label : row.name;
 }
 
-function useCodeLabel(kind: "major" | "grade" | "unit") {
+function useCodeLabel(kind: "major" | "grade" | "unit" | "resourceSpec") {
   const majorSpecs = useMajorSpecs();
   const grades = useGrades();
   const units = useUnits();
+  const resourceSpecs = useResourceSpecs();
   const saveMajor = useSaveMajorSpec();
   const saveGrade = useSaveGrade();
   const saveUnit = useSaveUnit();
+  const saveResourceSpec = useSaveResourceSpec();
   const delMajor = useDeleteMajorSpec();
   const delGrade = useDeleteGrade();
   const delUnit = useDeleteUnit();
+  const delResourceSpec = useDeleteResourceSpec();
 
+  if (kind === "resourceSpec") {
+    return {
+      // useResourceSpecs returns mapped rows — adapt to the raw row shape this tab renders.
+      query: {
+        ...resourceSpecs,
+        data: (resourceSpecs.data ?? []).map((r) => ({ id: r.id, code: r.code, name: r.name, is_active: r.isActive })),
+      },
+      save: saveResourceSpec,
+      del: delResourceSpec,
+      toBody: (code: string, value: string) => ({ code, name: value }),
+    } as const;
+  }
   if (kind === "major") {
     return {
       query: majorSpecs,
@@ -547,7 +580,7 @@ function CodeLabelTab({
   valueLabel,
   valuePlaceholder,
 }: {
-  kind: "major" | "grade" | "unit";
+  kind: "major" | "grade" | "unit" | "resourceSpec";
   title: string;
   titlePlural: string;
   codeLabel: string;

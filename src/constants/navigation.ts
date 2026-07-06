@@ -36,7 +36,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Overview",
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard, shortcut: "G D" },
-      { label: "Projects", href: "/products", icon: FolderKanban, shortcut: "G P", roles: ["Administrator", "Engineering", "Commercial", "Management"] },
+      { label: "Projects", href: "/products", icon: FolderKanban, shortcut: "G P", roles: ["Administrator", "Engineering", "Commercial", "Management", "Project Manager"] },
       { label: "Analytics", href: "/analytics", icon: BarChart3, shortcut: "G A", roles: ["Administrator", "Management", "Commercial"] },
     ],
   },
@@ -44,13 +44,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Engineering",
     items: [
       { label: "Material Master", href: "/parts", icon: Library, shortcut: "G L", roles: ["Administrator", "Engineering", "Purchase"] },
-      { label: "BOM Explorer", href: "/bom", icon: Network, shortcut: "G B", roles: ["Administrator", "Engineering", "Commercial", "Purchase"] },
+      { label: "BOM Explorer", href: "/bom", icon: Network, shortcut: "G B", roles: ["Administrator", "Engineering", "Commercial", "Purchase", "Project Manager"] },
     ],
   },
   {
     label: "Change Control",
     items: [
-      { label: "BOM Approvals", href: "/bom-approvals", icon: ClipboardCheck, badge: "count", roles: ["Administrator", "Engineering", "Commercial", "Purchase"] },
+      { label: "BOM Approvals", href: "/bom-approvals", icon: ClipboardCheck, badge: "count", roles: ["Administrator", "Engineering", "Commercial", "Purchase", "Project Manager"] },
     ],
   },
   {

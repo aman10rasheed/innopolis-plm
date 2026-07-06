@@ -28,9 +28,11 @@ import { Section, Field } from "@/components/shared/form-fields";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { FINISHES, COMPLIANCE_POOL } from "@/mock/pools";
-import { useUpdatePart } from "@/lib/api";
+import { useUpdatePart, usePart, useResourceSpecs } from "@/lib/api";
 import type { ApiPartInput } from "@/lib/api";
 import type { Part, Supplier, Lifecycle, SourcingType, Availability, ComplianceFlag } from "@/types";
+import { ChipMultiSelect } from "./create-part-dialog";
+import { formatCurrency, formatDate } from "@/lib/utils";
 
 const LIFECYCLES: Lifecycle[] = ["Concept", "In Design", "In Review", "Released", "Production", "Obsolete"];
 const SOURCING: SourcingType[] = ["Make", "Buy", "Standard"];
@@ -40,7 +42,7 @@ const MAKES = ["Inox", "L&T", "KSB", "Grundfos", "Endress+Hauser", "Emerson", "S
 
 const schema = z.object({
   name: z.string().min(2, "Description is required"),
-  description: z.string().optional(),
+  remarks: z.string().optional(),
   material: z.string().min(1),
   finish: z.string().min(1),
   make: z.string().optional(),
@@ -50,10 +52,8 @@ const schema = z.object({
   lifecycle: z.string().min(1),
   sourcing: z.string().min(1),
   availability: z.string().min(1),
-  supplierId: z.string().min(1, "Select a vendor"),
   weightKg: z.coerce.number().min(0),
   unitCost: z.coerce.number().min(0),
-  lastPurchasePrice: z.coerce.number().min(0),
   leadTimeDays: z.coerce.number().int().min(0),
   uom: z.string().min(1),
   stockQty: z.coerce.number().int().min(0),
@@ -81,6 +81,14 @@ export function EditPartDialog({
   const suppliers = vendors;
   const updatePart = useUpdatePart();
   const [compliance, setCompliance] = React.useState<ComplianceFlag[]>([]);
+  // Vendor/resource-spec arrays only come on single-material reads — fetch the detail.
+  const detailQ = usePart(part?.id ?? "");
+  const detail = detailQ.data;
+  const resourceSpecs = useResourceSpecs().data ?? [];
+  const [vendorIds, setVendorIds] = React.useState<string[]>([]);
+  const [resourceSpecIds, setResourceSpecIds] = React.useState<string[]>([]);
+  const toggleIn = (set: React.Dispatch<React.SetStateAction<string[]>>) => (id: string) =>
+    set((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -91,7 +99,7 @@ export function EditPartDialog({
     if (!part) return;
     reset({
       name: part.name,
-      description: part.description,
+      remarks: part.remarks,
       material: part.material,
       finish: part.finish,
       make: part.make === "—" ? "" : part.make,
@@ -101,10 +109,8 @@ export function EditPartDialog({
       lifecycle: part.lifecycle,
       sourcing: part.sourcing,
       availability: part.availability,
-      supplierId: part.supplierId,
       weightKg: part.weightKg,
       unitCost: part.unitCost,
-      lastPurchasePrice: part.lastPurchasePrice,
       leadTimeDays: part.leadTimeDays,
       uom: part.uom,
       stockQty: part.stockQty,
@@ -116,11 +122,18 @@ export function EditPartDialog({
     setCompliance(part.compliance);
   }, [part, reset]);
 
+  // Seed the many-to-many selections once the detail read resolves.
+  React.useEffect(() => {
+    if (!detail) return;
+    setVendorIds(detail.vendorIds);
+    setResourceSpecIds(detail.resourceSpecIds);
+  }, [detail]);
+
   const submit = handleSubmit(async (v) => {
     if (!part) return;
     const body: Partial<ApiPartInput> = {
       name: v.name,
-      description: v.description || part.description,
+      remarks: v.remarks || part.remarks,
       material: v.material,
       finish: v.finish,
       make: v.make || "—",
@@ -130,10 +143,10 @@ export function EditPartDialog({
       lifecycle: v.lifecycle as Lifecycle,
       sourcing: v.sourcing as SourcingType,
       availability: v.availability as Availability,
-      supplier_id: v.supplierId,
+      // Omit the arrays until the detail loaded (omit = leave unchanged on PATCH).
+      ...(detail ? { vendor_ids: vendorIds, resource_spec_ids: resourceSpecIds } : {}),
       weight_kg: Number(v.weightKg),
       unit_cost: Number(v.unitCost),
-      last_purchase_price: Number(v.lastPurchasePrice),
       lead_time_days: Number(v.leadTimeDays),
       uom: v.uom,
       stock_qty: Number(v.stockQty),
@@ -175,8 +188,8 @@ export function EditPartDialog({
                 <Field label="Description / name" error={errors.name?.message as string} className="col-span-2">
                   <Input {...register("name")} />
                 </Field>
-                <Field label="Notes" className="col-span-2">
-                  <Textarea rows={2} placeholder="Optional specification notes" {...register("description")} />
+                <Field label="Remarks" className="col-span-2">
+                  <Textarea rows={2} placeholder="Optional specification remarks" {...register("remarks")} />
                 </Field>
               </div>
             </Section>
@@ -226,18 +239,30 @@ export function EditPartDialog({
             {/* Commercial */}
             <Section title="Commercial Information">
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Preferred vendor" error={errors.supplierId?.message as string} className="col-span-2">
-                  <Controller control={control} name="supplierId" render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger><SelectValue placeholder="Select vendor" /></SelectTrigger>
-                      <SelectContent className="max-h-64">
-                        {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} · {s.country}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  )} />
+                <Field label="Preferred vendors (multiple allowed)" className="col-span-2">
+                  {detailQ.isLoading ? (
+                    <p className="py-1 text-2xs text-muted-foreground">Loading vendors…</p>
+                  ) : (
+                    <ChipMultiSelect
+                      options={suppliers.map((s) => ({ id: s.id, label: `${s.name} · ${s.country}` }))}
+                      selected={vendorIds}
+                      onToggle={toggleIn(setVendorIds)}
+                      emptyText="No vendors registered yet — add them under Vendors."
+                    />
+                  )}
                 </Field>
                 <Field label="Standard cost (₹)"><Input type="number" {...register("unitCost")} /></Field>
-                <Field label="Last purchase price (₹)"><Input type="number" {...register("lastPurchasePrice")} /></Field>
+                <Field label="Last purchase (system-maintained)">
+                  <Input
+                    readOnly
+                    disabled
+                    value={
+                      detail
+                        ? `${formatCurrency(detail.lastPurchasePrice)}${detail.lastPurchaseDate ? ` · ${formatDate(detail.lastPurchaseDate)}` : ""}${detail.lastPurchaseVendor ? ` · ${detail.lastPurchaseVendor.name}` : ""}`
+                        : formatCurrency(part?.lastPurchasePrice ?? 0)
+                    }
+                  />
+                </Field>
                 <Field label="Lead time (days)"><Input type="number" {...register("leadTimeDays")} /></Field>
                 <Field label="Sourcing">
                   <Controller control={control} name="sourcing" render={({ field }) => (
@@ -268,6 +293,20 @@ export function EditPartDialog({
                 </Field>
                 <Field label="Stock location" className="col-span-2"><Input {...register("stockLocation")} /></Field>
               </div>
+            </Section>
+
+            {/* Resource specs (predefined master, many-to-many) */}
+            <Section title="Resource Specifications">
+              {detailQ.isLoading ? (
+                <p className="py-1 text-2xs text-muted-foreground">Loading resource specs…</p>
+              ) : (
+                <ChipMultiSelect
+                  options={resourceSpecs.filter((r) => r.isActive).map((r) => ({ id: r.id, label: `${r.code} · ${r.name}` }))}
+                  selected={resourceSpecIds}
+                  onToggle={toggleIn(setResourceSpecIds)}
+                  emptyText="No resource specs defined — an Administrator can add them."
+                />
+              )}
             </Section>
 
             {/* Compliance */}

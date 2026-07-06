@@ -12,8 +12,13 @@ import type {
 } from "./types";
 import type {
   User, Part, Supplier, Product, ProjectBom, PurchaseOrder,
-  InventoryRecord, Rfq, Quotation, Warehouse, BomAuditEntry,
+  InventoryRecord, Rfq, Quotation, Warehouse, BomAuditEntry, ResourceSpec,
 } from "@/types";
+import type { ApiResourceSpec } from "./types";
+
+export const mapResourceSpec = (r: ApiResourceSpec): ResourceSpec => ({
+  id: r.id, code: r.code, name: r.name, description: r.description, isActive: r.is_active,
+});
 
 export const mapUser = (u: ApiUser): User => ({
   id: u.id, name: u.name, initials: u.initials, role: u.role, team: u.team,
@@ -30,7 +35,7 @@ export const mapPart = (p: ApiPart): Part => ({
   detailSpec: p.detail_spec,
   name: p.name,
   category: p.category as Part["category"],
-  description: p.description,
+  remarks: p.remarks,
   material: p.material,
   finish: p.finish,
   revision: p.revision,
@@ -39,8 +44,14 @@ export const mapPart = (p: ApiPart): Part => ({
   weightKg: toNumber(p.weight_kg),
   unitCost: toNumber(p.unit_cost),
   lastPurchasePrice: toNumber(p.last_purchase_price),
+  lastPurchaseDate: p.last_purchase_date ?? null,
+  lastPurchaseVendorId: p.last_purchase_vendor_id ?? null,
+  lastPurchaseVendor: p.last_purchase_vendor ? mapSupplier(p.last_purchase_vendor) : null,
   leadTimeDays: p.lead_time_days,
-  supplierId: p.supplier_id ?? "",
+  vendorIds: p.vendor_ids ?? [],
+  preferredVendors: (p.preferred_vendors ?? []).map(mapSupplier),
+  resourceSpecIds: p.resource_spec_ids ?? [],
+  resourceSpecs: (p.resource_specs ?? []).map(mapResourceSpec),
   manufacturerPartNumber: p.manufacturer_part_number,
   make: p.make,
   model: p.model,
@@ -81,6 +92,7 @@ export const mapProject = (p: ApiProject): Product => ({
   description: p.description,
   customer: p.customer,
   engineerId: p.engineer_id ?? "",
+  projectManagerId: p.project_manager_id ?? null,
   stage: p.stage,
   lifecycle: p.lifecycle,
   revision: p.revision,
@@ -97,6 +109,9 @@ export const mapProject = (p: ApiProject): Product => ({
   engineerName: p.engineer_name ?? null,
   engineerInitials: p.engineer_initials ?? null,
   engineerHue: p.engineer_hue ?? null,
+  managerName: p.manager_name ?? null,
+  managerInitials: p.manager_initials ?? null,
+  managerHue: p.manager_hue ?? null,
   thumbnailHue: p.thumbnail_hue,
   health: p.health ?? 80,
   category: p.category,

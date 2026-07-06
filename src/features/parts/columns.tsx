@@ -25,11 +25,11 @@ function SortHeader({ column, label, align = "left" }: { column: any; label: str
 }
 
 /**
- * Column definitions. Supplier names come from a vendor-name map (built from the
- * API vendors list) rather than the mock `getSupplier` selector, so the grid
- * resolves vendor names from the same data source as the rest of the screen.
+ * Column definitions. Preferred vendors are a per-material list that only
+ * comes on single-material reads (v1.0.1), so the grid has no supplier column —
+ * vendors show on the detail drawer instead.
  */
-export function makePartColumns(supplierName: (id: string) => string): ColumnDef<Part>[] {
+export function makePartColumns(): ColumnDef<Part>[] {
   return [
   {
     id: "select",
@@ -120,15 +120,6 @@ export function makePartColumns(supplierName: (id: string) => string): ColumnDef
         {getValue<string>()}
       </span>
     ),
-  },
-  {
-    accessorKey: "supplierId",
-    size: 150,
-    header: ({ column }) => <SortHeader column={column} label="Supplier" />,
-    cell: ({ getValue }) => {
-      const name = supplierName(getValue<string>());
-      return <span className="truncate text-[13px] text-muted-foreground">{name || "—"}</span>;
-    },
   },
   {
     accessorKey: "lifecycle",

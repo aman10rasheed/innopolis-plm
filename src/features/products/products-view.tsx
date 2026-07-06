@@ -24,7 +24,7 @@ import {
   Activity as ActivityIcon,
   User as UserIcon,
 } from "lucide-react";
-import { useProjects, useProject, useBoms, useRfqs, useSaveProject } from "@/lib/api";
+import { useProjects, useProject, useBoms, useRfqs, useSetProjectStage, useUpdateProject, useUsers } from "@/lib/api";
 import { QueryBoundary } from "@/components/shared/query-boundary";
 import { toast } from "@/components/ui/toast";
 import { canCreate } from "@/auth/permissions";
@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Thumbnail } from "@/components/shared/thumbnail";
 import { AreaTrend } from "@/components/shared/charts";
@@ -450,14 +451,16 @@ function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: ()
   );
   const currentIdx = PROJECT_STAGES.indexOf(project.stage);
 
-  const saveProject = useSaveProject();
+  const setStageMut = useSetProjectStage();
   const role = useAuthStore((s) => s.user?.role);
-  const canMoveStage = canCreate(role, "project");
+  // Stage moves go through PATCH /projects/:id/stage — allowed for Engineering
+  // and the assigned Project Manager (the server 403s a foreign project's PM).
+  const canMoveStage = canCreate(role, "project") || role === "Project Manager";
 
   const moveToStage = async (target: ProjectStage) => {
-    if (target === project.stage || saveProject.isPending) return;
+    if (target === project.stage || setStageMut.isPending) return;
     try {
-      await saveProject.mutateAsync({ id: project.id, body: { stage: target } });
+      await setStageMut.mutateAsync({ id: project.id, stage: target });
       toast.success("Stage updated", `${project.projectNumber} → ${target}`);
     } catch (err) {
       toast.error(
@@ -524,7 +527,7 @@ function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: ()
                     <button
                       type="button"
                       onClick={() => moveToStage(s)}
-                      disabled={saveProject.isPending || isCurrent}
+                      disabled={setStageMut.isPending || isCurrent}
                       aria-label={`Move to ${s}`}
                     >
                       {node}
@@ -556,7 +559,7 @@ function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: ()
                 size="xs"
                 variant="outline"
                 className="gap-1"
-                disabled={currentIdx <= 0 || saveProject.isPending}
+                disabled={currentIdx <= 0 || setStageMut.isPending}
                 onClick={() => moveToStage(PROJECT_STAGES[currentIdx - 1])}
               >
                 <ChevronLeft className="size-3" /> Back
@@ -564,7 +567,7 @@ function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: ()
               <Button
                 size="xs"
                 className="gap-1"
-                disabled={currentIdx >= PROJECT_STAGES.length - 1 || saveProject.isPending}
+                disabled={currentIdx >= PROJECT_STAGES.length - 1 || setStageMut.isPending}
                 onClick={() => moveToStage(PROJECT_STAGES[currentIdx + 1])}
               >
                 Advance <ChevronRight className="size-3" />
@@ -645,6 +648,12 @@ function ProjectDrawerBody({ project, onClose }: { project: Product; onClose: ()
                 <p className="text-2xs font-medium">{formatDate(project.releaseDate)}</p>
               </div>
             </div>
+
+            <ManagerCard
+              projectId={project.id}
+              detail={detailQ.data}
+              isAdmin={role === "Administrator"}
+            />
 
             <div className="rounded-xl border border-border bg-surface p-3">
               <p className="mb-1 text-[13px] font-semibold">Estimated cost trend</p>
@@ -748,6 +757,73 @@ function EmptyTab({ icon: Icon, label }: { icon: React.ComponentType<{ className
         <Icon className="size-5" />
       </div>
       <p className="text-2xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+/**
+ * Project Manager attribution (inline manager_* fields from the detail read)
+ * plus an Administrator-only assignment picker — GET /users is admin-only, so
+ * the picker sub-component (and its query) only mounts for Administrators.
+ */
+function ManagerCard({
+  projectId,
+  detail,
+  isAdmin,
+}: {
+  projectId: string;
+  detail: Product | undefined;
+  isAdmin: boolean;
+}) {
+  const hue = detail?.managerHue ?? 100;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+      <Avatar className="size-9">
+        <AvatarFallback style={{ background: `hsl(${hue} 55% 22%)`, color: `hsl(${hue} 80% 76%)` }}>
+          {detail?.managerInitials ?? "?"}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 text-[13px] font-medium">
+          <UserIcon className="size-3 text-muted-foreground" /> {detail?.managerName ?? "Unassigned"}
+        </p>
+        <p className="text-2xs text-muted-foreground">Project manager</p>
+      </div>
+      {isAdmin && <AssignPmSelect projectId={projectId} currentId={detail?.projectManagerId ?? ""} />}
+    </div>
+  );
+}
+
+function AssignPmSelect({ projectId, currentId }: { projectId: string; currentId: string }) {
+  const pmUsers = useUsers({ role: "Project Manager", pageSize: 100 });
+  const updateProject = useUpdateProject();
+  const options = pmUsers.data?.items ?? [];
+
+  const assign = async (userId: string) => {
+    try {
+      await updateProject.mutateAsync({ id: projectId, body: { project_manager_id: userId } });
+      toast.success("Project manager assigned", options.find((u) => u.id === userId)?.name ?? "Updated");
+    } catch (err) {
+      toast.error("Couldn't assign manager", err instanceof Error ? err.message : "Please try again.");
+    }
+  };
+
+  return (
+    <div className="w-44">
+      <Select value={currentId || undefined} onValueChange={assign} disabled={updateProject.isPending}>
+        <SelectTrigger className="h-7 text-xs">
+          <SelectValue placeholder={pmUsers.isLoading ? "Loading…" : "Assign PM"} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.length === 0 ? (
+            <div className="px-2 py-1.5 text-2xs text-muted-foreground">No Project Manager users yet</div>
+          ) : (
+            options.map((u) => (
+              <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+            ))
+          )}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

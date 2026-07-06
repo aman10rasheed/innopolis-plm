@@ -65,6 +65,11 @@ const ROLE_LINKS: Record<Role, { label: string; href: string; icon: React.Compon
     { label: "Reports", href: "/reports", icon: FileBarChart },
     { label: "Projects", href: "/products", icon: Package },
   ],
+  "Project Manager": [
+    { label: "Projects", href: "/products", icon: Package },
+    { label: "BOM Explorer", href: "/bom", icon: Network },
+    { label: "BOM Approvals", href: "/bom-approvals", icon: ClipboardCheck },
+  ],
 };
 
 export default function DashboardPage() {

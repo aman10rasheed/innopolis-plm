@@ -56,9 +56,11 @@ import {
   useAddBomLine,
   useUpdateBomLine,
   useCreateBom,
+  useSetLineRequiredDate,
   toNumber,
 } from "@/lib/api";
 import { ensureCanCreate } from "@/auth/permissions";
+import { useAuthStore } from "@/stores/auth-store";
 import type { ApiBomDetail, ApiBomLine } from "@/lib/api";
 import type { BomNode, Product } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
@@ -791,6 +793,11 @@ function BomDocumentView({
                 </div>
               ))}
             </div>
+            <RequiredByDate
+              key={activeNode.id}
+              bomId={activeBomId}
+              line={detail.lines.find((l) => l.id === activeNode.id)}
+            />
           </div>
         )}
       </div>
@@ -800,6 +807,51 @@ function BomDocumentView({
         projectName={rootName}
         existingRefIds={existingRefIds}
         addBomLine={addBomLine}
+      />
+    </div>
+  );
+}
+
+/**
+ * PM planning date on a BOM line (PATCH /bom-lines/:id/required-date).
+ * Unlike other line edits this is allowed at ANY BOM stage — roles:
+ * Project Manager (own projects), Engineering, Administrator.
+ */
+function RequiredByDate({ bomId, line }: { bomId: string; line: ApiBomLine | undefined }) {
+  const role = useAuthStore((s) => s.user?.role);
+  const setDate = useSetLineRequiredDate();
+  const canEdit = role === "Project Manager" || role === "Engineering" || role === "Administrator";
+  if (!line) return null;
+
+  const commit = async (value: string) => {
+    const date = value || null;
+    if ((line.required_by_date ?? null) === date) return;
+    try {
+      await setDate.mutateAsync({ lineId: line.id, date, bomId });
+      toast.success("Required-by date set", date ? `${line.part_number} → ${date}` : `${line.part_number} — date cleared`);
+    } catch (e) {
+      toast.error("Couldn't set date", e instanceof Error ? e.message : "Please try again");
+    }
+  };
+
+  if (!canEdit) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-surface p-2 text-2xs">
+        <p className="text-muted-foreground">Required by</p>
+        <p className="mt-0.5 font-medium tabular">{line.required_by_date ?? "—"}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-1">
+      <p className="text-2xs text-muted-foreground">Required by (planning date — editable at any stage)</p>
+      <Input
+        type="date"
+        className="h-7 text-xs"
+        defaultValue={line.required_by_date ?? ""}
+        disabled={setDate.isPending}
+        onBlur={(e) => commit(e.target.value)}
       />
     </div>
   );

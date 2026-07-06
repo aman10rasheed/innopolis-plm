@@ -28,9 +28,46 @@ import { Section, Field } from "@/components/shared/form-fields";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { FINISHES, COMPLIANCE_POOL } from "@/mock/pools";
-import { useMaterialMasters, useSubtypes, useCreatePart } from "@/lib/api";
+import { useMaterialMasters, useSubtypes, useCreatePart, useResourceSpecs } from "@/lib/api";
 import type { ApiPartInput } from "@/lib/api";
 import type { Supplier, Lifecycle, SourcingType, ComplianceFlag } from "@/types";
+
+/** Chip-toggle multi-select (same idiom as the compliance flags). */
+export function ChipMultiSelect({
+  options,
+  selected,
+  onToggle,
+  emptyText,
+}: {
+  options: { id: string; label: string }[];
+  selected: string[];
+  onToggle: (id: string) => void;
+  emptyText: string;
+}) {
+  if (options.length === 0) {
+    return <p className="py-1 text-2xs text-muted-foreground">{emptyText}</p>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const on = selected.includes(o.id);
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onToggle(o.id)}
+            className={cn(
+              "flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors",
+              on ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {on && <Check className="size-3" />} {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const LIFECYCLES: Lifecycle[] = ["Concept", "In Design", "In Review", "Released", "Production"];
 const SOURCING: SourcingType[] = ["Make", "Buy", "Standard"];
@@ -42,7 +79,7 @@ const schema = z.object({
   majorSpecId: z.string().min(1),
   gradeId: z.string().min(1),
   name: z.string().min(2, "Description is required"),
-  description: z.string().optional(),
+  remarks: z.string().optional(),
   material: z.string().min(1),
   finish: z.string().min(1),
   make: z.string().optional(),
@@ -51,7 +88,6 @@ const schema = z.object({
   revision: z.string().min(1),
   lifecycle: z.string().min(1),
   sourcing: z.string().min(1),
-  supplierId: z.string().min(1, "Select a vendor"),
   unitCost: z.coerce.number().min(0),
   lastPurchasePrice: z.coerce.number().min(0),
   leadTimeDays: z.coerce.number().int().min(0),
@@ -108,18 +144,25 @@ export function CreatePartDialog({
 }) {
   const mastersQuery = useMaterialMasters();
   const createPart = useCreatePart();
+  const resourceSpecsQuery = useResourceSpecs();
+  const resourceSpecs = resourceSpecsQuery.data ?? [];
 
   const categories = mastersQuery.data?.categories ?? [];
   const majorSpecs = mastersQuery.data?.majorSpecs ?? [];
   const grades = mastersQuery.data?.grades ?? [];
 
   const [compliance, setCompliance] = React.useState<ComplianceFlag[]>(["ASME", "3.1 Cert"] as ComplianceFlag[]);
+  // Many-to-many selections (chips): preferred vendors + resource specs.
+  const [vendorIds, setVendorIds] = React.useState<string[]>([]);
+  const [resourceSpecIds, setResourceSpecIds] = React.useState<string[]>([]);
+  const toggleIn = (set: React.Dispatch<React.SetStateAction<string[]>>) => (id: string) =>
+    set((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const defaults: FormValues = {
     categoryId: "", subtypeId: "", majorSpecId: "", gradeId: "",
-    name: "", description: "", material: "SS 304", finish: "Pickled & Passivated",
+    name: "", remarks: "", material: "SS 304", finish: "Pickled & Passivated",
     make: "", model: "", drawingRef: "", revision: "A", lifecycle: "In Design", sourcing: "Buy",
-    supplierId: "", unitCost: 0, lastPurchasePrice: 0, leadTimeDays: 14, uom: "Nos",
+    unitCost: 0, lastPurchasePrice: 0, leadTimeDays: 14, uom: "Nos",
     reorderPoint: 50, minStock: 50, maxStock: 300, stockLocation: "",
   };
 
@@ -153,7 +196,12 @@ export function CreatePartDialog({
   }, [subtypeId, majorSpecId, gradeId, categoryId]);
 
   React.useEffect(() => {
-    if (open) { reset(defaults); setCompliance(["ASME", "3.1 Cert"] as ComplianceFlag[]); }
+    if (open) {
+      reset(defaults);
+      setCompliance(["ASME", "3.1 Cert"] as ComplianceFlag[]);
+      setVendorIds([]);
+      setResourceSpecIds([]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -167,7 +215,7 @@ export function CreatePartDialog({
         major_spec_id: v.majorSpecId || undefined,
         grade_id: v.gradeId || undefined,
         name: v.name,
-        description: v.description || `${v.material} ${v.name.toLowerCase()}.`,
+        remarks: v.remarks || `${v.material} ${v.name.toLowerCase()}.`,
         material: v.material,
         finish: v.finish,
         revision: v.revision,
@@ -176,7 +224,8 @@ export function CreatePartDialog({
         unit_cost: Number(v.unitCost),
         last_purchase_price: Number(v.lastPurchasePrice) || Number(v.unitCost),
         lead_time_days: Number(v.leadTimeDays),
-        supplier_id: v.supplierId,
+        vendor_ids: vendorIds,
+        resource_spec_ids: resourceSpecIds,
         make: v.make || undefined,
         model: v.model || undefined,
         drawing_ref: v.drawingRef || undefined,
@@ -288,8 +337,8 @@ export function CreatePartDialog({
                 <Field label="Description / name" error={errors.name?.message as string} className="col-span-2">
                   <Input placeholder="auto-generated from code" {...register("name")} />
                 </Field>
-                <Field label="Notes" className="col-span-2">
-                  <Textarea rows={2} placeholder="Optional specification notes" {...register("description")} />
+                <Field label="Remarks" className="col-span-2">
+                  <Textarea rows={2} placeholder="Optional specification remarks" {...register("remarks")} />
                 </Field>
               </div>
             </Section>
@@ -330,20 +379,18 @@ export function CreatePartDialog({
             {/* Commercial */}
             <Section title="Commercial Information">
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Preferred vendor" error={errors.supplierId?.message as string} className="col-span-2">
-                  <Controller control={control} name="supplierId" render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger><SelectValue placeholder="Select vendor" /></SelectTrigger>
-                      <SelectContent className="max-h-64">
-                        {vendors.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} · {s.country}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  )} />
+                <Field label="Preferred vendors (multiple allowed)" className="col-span-2">
+                  <ChipMultiSelect
+                    options={vendors.map((s) => ({ id: s.id, label: `${s.name} · ${s.country}` }))}
+                    selected={vendorIds}
+                    onToggle={toggleIn(setVendorIds)}
+                    emptyText="No vendors registered yet — add them under Vendors."
+                  />
                 </Field>
                 <Field label="Standard cost (₹)">
                   <Input type="number" {...register("unitCost")} />
                 </Field>
-                <Field label="Last purchase price (₹)">
+                <Field label="Opening purchase price (₹) — auto-updates on receipts">
                   <Input type="number" {...register("lastPurchasePrice")} />
                 </Field>
                 <Field label="Lead time (days)"><Input type="number" {...register("leadTimeDays")} /></Field>
@@ -367,6 +414,16 @@ export function CreatePartDialog({
                 <Field label="Reorder point"><Input type="number" {...register("reorderPoint")} /></Field>
                 <Field label="Stock location" className="col-span-4"><Input placeholder="e.g. WH-A · Rack 01" {...register("stockLocation")} /></Field>
               </div>
+            </Section>
+
+            {/* Resource specs (predefined master, many-to-many) */}
+            <Section title="Resource Specifications">
+              <ChipMultiSelect
+                options={resourceSpecs.filter((r) => r.isActive).map((r) => ({ id: r.id, label: `${r.code} · ${r.name}` }))}
+                selected={resourceSpecIds}
+                onToggle={toggleIn(setResourceSpecIds)}
+                emptyText={resourceSpecsQuery.isLoading ? "Loading resource specs…" : "No resource specs defined — an Administrator can add them."}
+              />
             </Section>
 
             {/* Compliance */}

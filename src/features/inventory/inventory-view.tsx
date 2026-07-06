@@ -111,17 +111,19 @@ export function InventoryView() {
       const byVendor = new Map<string, { record: InventoryRecord; unitPrice: number; maxStock: number }[]>();
       parts.forEach((part, i) => {
         const record = fresh[i]!;
-        if (!part.supplier_id) {
+        // First preferred vendor wins (vendor_ids keeps the order they were set).
+        const vendorId = part.vendor_ids?.[0];
+        if (!vendorId) {
           noVendor.push(record.partNumber);
           return;
         }
-        const group = byVendor.get(part.supplier_id) ?? [];
+        const group = byVendor.get(vendorId) ?? [];
         group.push({
           record,
           unitPrice: toNumber(part.last_purchase_price) || toNumber(part.unit_cost),
           maxStock: toNumber(part.max_stock),
         });
-        byVendor.set(part.supplier_id, group);
+        byVendor.set(vendorId, group);
       });
 
       for (const [supplierId, items] of byVendor) {

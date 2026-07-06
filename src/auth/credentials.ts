@@ -12,7 +12,8 @@ export type Role =
   | "Commercial"
   | "Purchase"
   | "Stores"
-  | "Management";
+  | "Management"
+  | "Project Manager";
 
 export interface DemoCredential {
   email: string;
@@ -31,6 +32,7 @@ export const CREDENTIALS: DemoCredential[] = [
   { email: "purchase@innopolis.bio", password: "purchase123", role: "Purchase", name: "James Park", initials: "JP", hue: 210 },
   { email: "stores@innopolis.bio", password: "stores123", role: "Stores", name: "Raj Patel", initials: "RP", hue: 152 },
   { email: "management@innopolis.bio", password: "management123", role: "Management", name: "Hannah Berg", initials: "HB", hue: 320 },
+  { email: "pm@innopolis.bio", password: "pm123456", role: "Project Manager", name: "Arjun Mehta", initials: "AM", hue: 100 },
 ];
 
 export interface RoleMeta {
@@ -86,9 +88,16 @@ export const ROLE_META: Record<Role, RoleMeta> = {
     home: "/analytics",
     color: "primary",
   },
+  "Project Manager": {
+    label: "Project Manager",
+    blurb: "Coordinate assigned projects — stages, dates & purchase release",
+    capabilities: ["Own-project visibility", "Release BOM for purchase", "Set line required-by dates", "Update project stage"],
+    home: "/products",
+    color: "success",
+  },
 };
 
-export const ROLES: Role[] = ["Administrator", "Engineering", "Commercial", "Purchase", "Stores", "Management"];
+export const ROLES: Role[] = ["Administrator", "Engineering", "Commercial", "Purchase", "Stores", "Management", "Project Manager"];
 
 /** Validate a login. Returns the matched account or null. */
 export function authenticate(email: string, password: string): DemoCredential | null {

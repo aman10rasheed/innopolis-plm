@@ -129,6 +129,29 @@ export function useDeletePart() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api.parts.remove(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["parts"] }) });
 }
+/** Purchase-price ledger for one material (newest first). */
+export const usePartPriceHistory = (id: string) =>
+  useQuery({ queryKey: ["parts", id, "price-history"], queryFn: () => api.parts.priceHistory(id), enabled: !!id });
+
+/* ---- Resource specs master ---- */
+export const useResourceSpecs = () =>
+  useQuery({ queryKey: ["resource-specs"], queryFn: async () => (await api.masters.resourceSpecs()).map(m.mapResourceSpec) });
+export function useSaveResourceSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Record<string, unknown> }) =>
+      id ? api.masters.updateResourceSpec(id, body) : api.masters.createResourceSpec(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resource-specs"] }),
+  });
+}
+/** 409 = spec still assigned to materials; surface the server message. */
+export function useDeleteResourceSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.masters.deleteResourceSpec(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["resource-specs"] }),
+  });
+}
 
 /* ---- Vendors ---- */
 export const useVendors = (filters?: Query) =>
@@ -164,6 +187,22 @@ export const useProject = (id: string) =>
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (body: Record<string, unknown>) => api.projects.create(body), onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }) });
+}
+export function useUpdateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => api.projects.update(id, body),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["projects"] }); qc.invalidateQueries({ queryKey: qk.project(v.id) }); },
+  });
+}
+/** Project coordination — PM (own projects) or Engineering. */
+export function useSetProjectStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, stage }: { id: string; stage: Parameters<typeof api.projects.setStage>[1] }) =>
+      api.projects.setStage(id, stage),
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ["projects"] }); qc.invalidateQueries({ queryKey: qk.project(v.id) }); },
+  });
 }
 
 /* ---- BOMs + approval workflow ---- */
@@ -201,6 +240,18 @@ export function useTransitionBom() {
     mutationFn: ({ id, action, comment }: { id: string; action: "advance" | "reject"; comment?: string }) =>
       api.boms.transition(id, action, comment),
     onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: qk.bom(v.id) }); qc.invalidateQueries({ queryKey: ["boms"] }); },
+  });
+}
+/** PM planning date on a BOM line — allowed at any stage. */
+export function useSetLineRequiredDate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ lineId, date }: { lineId: string; date: string | null; bomId?: string }) =>
+      api.boms.setLineRequiredDate(lineId, date),
+    onSuccess: (_d, v) => {
+      if (v.bomId) qc.invalidateQueries({ queryKey: qk.bom(v.bomId) });
+      qc.invalidateQueries({ queryKey: ["boms"] });
+    },
   });
 }
 

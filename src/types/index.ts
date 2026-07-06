@@ -31,6 +31,15 @@ export type SourcingType = "Make" | "Buy" | "Standard";
 export type Availability = "In Stock" | "Low Stock" | "Backorder" | "Out of Stock";
 export type ComplianceFlag = "ASME" | "PED" | "ATEX" | "GMP" | "3.1 Cert";
 
+/** Predefined resource specification (admin-managed master). */
+export interface ResourceSpec {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+}
+
 export interface Part {
   id: string;
   /** Intelligent material code TT-SS-MM-DDDD (also the primary identifier). */
@@ -42,7 +51,8 @@ export interface Part {
   detailSpec: string; // DDDD
   name: string;
   category: PartCategory;
-  description: string;
+  /** Material free text (API `remarks`, formerly `description`). */
+  remarks: string;
   material: string;
   finish: string;
   revision: string;
@@ -50,9 +60,19 @@ export interface Part {
   sourcing: SourcingType;
   weightKg: number;
   unitCost: number;
+  /** System-maintained: auto-updated on every goods receipt. */
   lastPurchasePrice: number;
+  lastPurchaseDate: string | null;
+  lastPurchaseVendorId: string | null;
+  /** Resolved vendor of the last purchase (single-material reads only). */
+  lastPurchaseVendor: Supplier | null;
   leadTimeDays: number;
-  supplierId: string;
+  /** Preferred vendors (single-material reads only; empty on list rows). */
+  vendorIds: string[];
+  preferredVendors: Supplier[];
+  /** Resource specs (single-material reads only; empty on list rows). */
+  resourceSpecIds: string[];
+  resourceSpecs: ResourceSpec[];
   manufacturerPartNumber: string;
   make: string;
   model: string;
@@ -109,6 +129,8 @@ export interface Product {
   description: string;
   customer: string;
   engineerId: string;
+  /** Assigned Project Manager (scopes PM visibility/actions). */
+  projectManagerId: string | null;
   stage: ProjectStage;
   lifecycle: Lifecycle;
   revision: string;
@@ -126,6 +148,9 @@ export interface Product {
   engineerName?: string | null;
   engineerInitials?: string | null;
   engineerHue?: number | null;
+  managerName?: string | null;
+  managerInitials?: string | null;
+  managerHue?: number | null;
   thumbnailHue: number;
   health: number; // 0-100
   category: string;

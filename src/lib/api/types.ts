@@ -86,6 +86,7 @@ export interface ApiSubtype { id: UUID; category_id: UUID; name: string; code: s
 export interface ApiMajorSpec { id: UUID; code: string; label: string; is_active: boolean }
 export interface ApiGrade { id: UUID; code: string; label: string; is_active: boolean }
 export interface ApiUnit { id: UUID; code: string; name: string; is_active: boolean }
+export interface ApiResourceSpec { id: UUID; code: string; name: string; description: string; is_active: boolean }
 
 /* ---- Part (Material) ---- */
 export interface ApiPart {
@@ -102,7 +103,8 @@ export interface ApiPart {
   detail_spec: string;
   category: string;
   name: string;
-  description: string;
+  /** Material free text — renamed from `description` in v1.0.1. */
+  remarks: string;
   material: string;
   finish: string;
   revision: string;
@@ -110,9 +112,19 @@ export interface ApiPart {
   sourcing: SourcingType;
   weight_kg: Num;
   unit_cost: Num;
+  /** System-maintained after purchases: auto-updated on every goods receipt. */
   last_purchase_price: Num;
+  last_purchase_date?: ISO | null;
+  last_purchase_vendor_id?: UUID | null;
+  /** Resolved vendor of the last purchase (single-material reads; null = manual opening value). */
+  last_purchase_vendor?: ApiSupplier | null;
   lead_time_days: number;
-  supplier_id: UUID | null;
+  /** Preferred vendors (many-to-many; single-material reads only). */
+  vendor_ids?: UUID[];
+  preferred_vendors?: ApiSupplier[];
+  /** Resource specs (many-to-many; single-material reads only). */
+  resource_spec_ids?: UUID[];
+  resource_specs?: ApiResourceSpec[];
   manufacturer_part_number: string;
   make: string;
   model: string;
@@ -143,7 +155,7 @@ export interface ApiPartInput {
   major_spec_id?: UUID;
   grade_id?: UUID;
   name: string;
-  description?: string;
+  remarks?: string;
   material?: string;
   finish?: string;
   revision?: string;
@@ -153,7 +165,10 @@ export interface ApiPartInput {
   unit_cost?: number;
   last_purchase_price?: number;
   lead_time_days?: number;
-  supplier_id?: UUID;
+  /** Preferred vendor UUIDs. On PATCH: omit = unchanged, [] = clear. */
+  vendor_ids?: UUID[];
+  /** Resource-spec UUIDs. On PATCH: omit = unchanged, [] = clear. */
+  resource_spec_ids?: UUID[];
   manufacturer_part_number?: string;
   make?: string;
   model?: string;
@@ -210,6 +225,8 @@ export interface ApiProject {
   category: string;
   description: string;
   engineer_id: UUID | null;
+  /** Assigned Project Manager (scopes what a PM sees / may act on). */
+  project_manager_id?: UUID | null;
   stage: ProjectStage;
   lifecycle: Lifecycle;
   revision: string;
@@ -226,6 +243,9 @@ export interface ApiProject {
   engineer_name?: string | null;
   engineer_initials?: string | null;
   engineer_hue?: number | null;
+  manager_name?: string | null;
+  manager_initials?: string | null;
+  manager_hue?: number | null;
   thumbnail_hue: number;
   health?: number;
   created_at: ISO;
@@ -276,6 +296,8 @@ export interface ApiBomLine {
   buying_notes: string | null;
   drawing_ref: string | null;
   vendor_id: UUID | null;
+  /** Planning date, PM-editable at any BOM stage (YYYY-MM-DD). */
+  required_by_date?: string | null;
   is_critical: boolean;
 }
 export interface ApiBomAudit {
@@ -307,6 +329,25 @@ export interface ApiBomLineInput {
   drawing_ref?: string;
   is_critical?: boolean;
   unit_cost?: number;
+  required_by_date?: string;
+}
+
+/* ---- Purchase-price history (Material) ---- */
+export interface ApiPriceHistoryRow {
+  unit_price: Num;
+  source: "Initial" | "Purchase";
+  vendor_id: UUID | null;
+  purchase_order_id: UUID | null;
+  reference: string;
+  quantity: Num;
+  effective_date: ISO;
+}
+export interface ApiPriceHistory {
+  part_id: UUID;
+  last_purchase_price: Num;
+  last_purchase_date: ISO | null;
+  last_purchase_vendor: ApiSupplier | null;
+  history: ApiPriceHistoryRow[];
 }
 
 /* ---- RFQ / Quotation ---- */
