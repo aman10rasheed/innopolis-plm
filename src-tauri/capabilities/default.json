@@ -7,6 +7,14 @@
     "core:default",
     "shell:allow-open",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://66.116.247.30:7100/*" },
+        { "url": "http://localhost:7100/*" },
+        { "url": "https://*/*" }
+      ]
+    }
   ]
 }

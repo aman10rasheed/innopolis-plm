@@ -3,7 +3,7 @@
  * Mirrors docs/API_GUIDE.md. Returns raw API DTOs; map with `mappers.ts`.
  * ==========================================================================*/
 
-import { req, reqList, API_BASE, type Query } from "./client";
+import { req, reqList, resolveFetch, API_BASE, type Query } from "./client";
 import type {
   ApiAuthResponse, ApiUser, ApiUserFull, ApiCreateUserInput, ApiResetPasswordResponse,
   ApiCategory, ApiSubtype, ApiMajorSpec, ApiGrade, ApiUnit, ApiResourceSpec,
@@ -183,7 +183,8 @@ export const api = {
 
   /* ---- Service health (lives outside /api) ---- */
   health: async (): Promise<{ ok: boolean; status?: string }> => {
-    const res = await fetch(`${API_BASE}/health`);
+    const doFetch = await resolveFetch();
+    const res = await doFetch(`${API_BASE}/health`);
     const json = (await res.json().catch(() => null)) as { status?: string } | null;
     return { ok: res.ok, status: json?.status };
   },

@@ -52,7 +52,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # The signing key has no password, so no TAURI_SIGNING_PRIVATE_KEY_PASSWORD is needed.
+          # The key has an empty password; set it explicitly so the CLI doesn't try to prompt.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Innopolis v__VERSION__"

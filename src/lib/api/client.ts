@@ -74,6 +74,20 @@ export class ApiError extends Error {
 
 export type Query = Record<string, string | number | boolean | undefined | null>;
 
+/**
+ * In the packaged desktop app the UI runs on a secure `tauri://` origin, so the
+ * webview blocks plain-http requests (mixed content) and enforces CORS against
+ * the backend. Route requests through the Tauri HTTP plugin (Rust side) there;
+ * fall back to the browser's fetch everywhere else.
+ */
+export async function resolveFetch(): Promise<typeof fetch> {
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
+    return tauriFetch as typeof fetch;
+  }
+  return fetch;
+}
+
 function qs(query?: Query): string {
   if (!query) return "";
   const parts = Object.entries(query)
@@ -105,7 +119,8 @@ export async function apiFetch<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/api${path}${qs(query)}`, {
+    const doFetch = await resolveFetch();
+    res = await doFetch(`${API_BASE}/api${path}${qs(query)}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
