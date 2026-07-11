@@ -1,6 +1,6 @@
 {
   "name": "innopolis-plm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Innopolis — next-generation BOM & Product Lifecycle Management platform",
   "scripts": {
