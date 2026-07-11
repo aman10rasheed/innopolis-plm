@@ -7,6 +7,16 @@ import { useUIStore } from "@/stores/ui-store";
 export function StatusBar() {
   const { toggleAi } = useUIStore();
   const [time, setTime] = React.useState<string>("");
+  const [version, setVersion] = React.useState<string>("");
+
+  // Real app version from the Tauri shell; browser builds show nothing.
+  React.useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then(setVersion)
+      .catch(() => {});
+  }, []);
 
   React.useEffect(() => {
     const tick = () =>
@@ -34,10 +44,12 @@ export function StatusBar() {
           <Cpu className="size-3" />
           Rollup engine idle
         </span>
-        <span className="flex items-center gap-1.5">
-          <Cloud className="size-3" />
-          v0.1.0
-        </span>
+        {version && (
+          <span className="flex items-center gap-1.5">
+            <Cloud className="size-3" />
+            v{version}
+          </span>
+        )}
         <span className="tabular">{time}</span>
       </div>
     </footer>

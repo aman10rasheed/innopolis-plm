@@ -49,11 +49,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Gate: not signed in → login screen.
-  if (!user) return <LoginScreen />;
+  // Gates render outside the shell but keep the toaster + update checker
+  // mounted, so a build with a broken login can still offer the fix update.
+  if (!user) {
+    return (
+      <>
+        <LoginScreen />
+        <Toaster />
+        <UpdateChecker />
+      </>
+    );
+  }
 
   // Gate: signed in but the backend requires a password change → set-password screen.
-  if (mustChangePassword) return <SetPasswordScreen />;
+  if (mustChangePassword) {
+    return (
+      <>
+        <SetPasswordScreen />
+        <Toaster />
+        <UpdateChecker />
+      </>
+    );
+  }
 
   const allowed = canAccess(user.role, pathname);
 
