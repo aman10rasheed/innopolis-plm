@@ -1,6 +1,6 @@
 [package]
 name = "innopolis-plm"
-version = "0.1.0"
+version = "0.1.1"
 description = "Innopolis — next-generation BOM & PLM platform"
 authors = ["Innopolis"]
 edition = "2021"
