@@ -12,6 +12,7 @@ import { TopToolbar } from "./top-toolbar";
 import { Sidebar } from "./sidebar";
 import { Inspector } from "./inspector";
 import { StatusBar } from "./status-bar";
+import { UpdateChecker } from "./update-checker";
 import { ResizeHandle } from "./resize-handle";
 import { Toaster } from "@/components/ui/toast";
 import { CommandPalette } from "@/components/overlays/command-palette";
@@ -78,6 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Global overlays */}
       <Toaster />
+      <UpdateChecker />
       <CommandPalette />
       <SearchDialog />
       <AiAssistant />

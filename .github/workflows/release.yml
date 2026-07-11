@@ -1,0 +1,62 @@
+name: Release
+
+# Builds, signs, and publishes the desktop app to GitHub Releases whenever a
+# version tag (v1.2.3) is pushed. The published `latest.json` is what running
+# apps poll to discover updates (see plugins.updater in tauri.conf.json).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest # Intel Macs
+            args: --target x86_64-apple-darwin
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The signing key has no password, so no TAURI_SIGNING_PRIVATE_KEY_PASSWORD is needed.
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Innopolis v__VERSION__"
+          releaseBody: "See the assets below to download and install this version."
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
