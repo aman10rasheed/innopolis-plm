@@ -150,6 +150,7 @@ export function CreatePartDialog({
   const categories = mastersQuery.data?.categories ?? [];
   const majorSpecs = mastersQuery.data?.majorSpecs ?? [];
   const grades = mastersQuery.data?.grades ?? [];
+  const units = mastersQuery.data?.units ?? [];
 
   const [compliance, setCompliance] = React.useState<ComplianceFlag[]>(["ASME", "3.1 Cert"] as ComplianceFlag[]);
   // Many-to-many selections (chips): preferred vendors + resource specs.
@@ -418,7 +419,18 @@ export function CreatePartDialog({
             {/* Inventory */}
             <Section title="Inventory Information">
               <div className="grid grid-cols-4 gap-4">
-                <Field label="UoM"><Input {...register("uom")} /></Field>
+                <Field label="UoM" error={errors.uom?.message as string}>
+                  <Controller control={control} name="uom" render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger><SelectValue placeholder="Unit" /></SelectTrigger>
+                      <SelectContent className="max-h-64">
+                        {units.filter((u) => u.is_active).map((u) => (
+                          <SelectItem key={u.id} value={u.code}>{u.code} · {u.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )} />
+                </Field>
                 <Field label="Min stock"><Input type="number" {...register("minStock")} /></Field>
                 <Field label="Max stock"><Input type="number" {...register("maxStock")} /></Field>
                 <Field label="Reorder point"><Input type="number" {...register("reorderPoint")} /></Field>
