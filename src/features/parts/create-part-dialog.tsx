@@ -334,13 +334,23 @@ export function CreatePartDialog({
             {/* Basic */}
             <Section title="Basic Information">
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Description / name" error={errors.name?.message as string} className="col-span-2">
+                <Field label="Material name" error={errors.name?.message as string} className="col-span-2">
                   <Input placeholder="auto-generated from code" {...register("name")} />
                 </Field>
                 <Field label="Remarks" className="col-span-2">
                   <Textarea rows={2} placeholder="Optional specification remarks" {...register("remarks")} />
                 </Field>
               </div>
+            </Section>
+
+            {/* Resource specs (predefined master, many-to-many) */}
+            <Section title="Resource Specifications">
+              <ChipMultiSelect
+                options={resourceSpecs.filter((r) => r.isActive).map((r) => ({ id: r.id, label: `${r.code} · ${r.name}` }))}
+                selected={resourceSpecIds}
+                onToggle={toggleIn(setResourceSpecIds)}
+                emptyText={resourceSpecsQuery.isLoading ? "Loading resource specs…" : "No resource specs defined — an Administrator can add them."}
+              />
             </Section>
 
             {/* Technical */}
@@ -414,16 +424,6 @@ export function CreatePartDialog({
                 <Field label="Reorder point"><Input type="number" {...register("reorderPoint")} /></Field>
                 <Field label="Stock location" className="col-span-4"><Input placeholder="e.g. WH-A · Rack 01" {...register("stockLocation")} /></Field>
               </div>
-            </Section>
-
-            {/* Resource specs (predefined master, many-to-many) */}
-            <Section title="Resource Specifications">
-              <ChipMultiSelect
-                options={resourceSpecs.filter((r) => r.isActive).map((r) => ({ id: r.id, label: `${r.code} · ${r.name}` }))}
-                selected={resourceSpecIds}
-                onToggle={toggleIn(setResourceSpecIds)}
-                emptyText={resourceSpecsQuery.isLoading ? "Loading resource specs…" : "No resource specs defined — an Administrator can add them."}
-              />
             </Section>
 
             {/* Compliance */}
