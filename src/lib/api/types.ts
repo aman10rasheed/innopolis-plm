@@ -420,18 +420,29 @@ export interface ApiPoDetail extends ApiPurchaseOrder { lines: ApiPoLine[] }
 
 /** One line of a Goods Receipt Note (per-delivery quantities, not cumulative). */
 export interface ApiGrnLine {
+  po_line_id: UUID;
   part_number: string;
   received_qty: Num;
   rejected_qty: Num;
   accepted_qty: Num;
   batch: string;
 }
-/** A Goods Receipt Note — one record per delivery (GET /purchase-orders/:id/receipts). */
+/**
+ * A Goods Receipt Note — one record per delivery, newest first
+ * (GET /purchase-orders/:id/receipts). Receiver display fields come back
+ * inline (Gotcha 6) — never resolve received_by via /users (admin-only).
+ */
 export interface ApiGrn {
+  id: UUID;
   grn_number: string;
-  received_at: string;
-  received_by_name: string;
+  po_id: UUID;
+  warehouse_id: UUID;
+  received_by: UUID;
+  received_by_name: string | null;
+  received_by_initials: string | null;
+  received_by_hue: number | null;
   note: string;
+  received_at: string;
   lines: ApiGrnLine[];
 }
 

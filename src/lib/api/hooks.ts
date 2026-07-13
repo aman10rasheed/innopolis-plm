@@ -6,7 +6,7 @@
  * Mutations invalidate the right keys so aggregates/stages refresh after writes.
  * ==========================================================================*/
 
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { api } from "./endpoints";
 import type { Query } from "./client";
 import * as m from "./mappers";
@@ -107,6 +107,26 @@ export const useParts = (filters?: Query) =>
   });
 export const usePart = (id: string) =>
   useQuery({ queryKey: qk.part(id), queryFn: async () => m.mapPart(await api.parts.get(id)), enabled: !!id });
+
+/**
+ * Preferred vendors for a set of materials. The parts LIST doesn't carry them
+ * (detail-only), so this fans out one detail fetch per unique part_id and
+ * returns them keyed by part id. Results are cached under the same `part(id)`
+ * key as usePart, so they're shared/deduped across the app.
+ */
+export function usePreferredVendorsByPart(partIds: string[]) {
+  const results = useQueries({
+    queries: partIds.map((id) => ({
+      queryKey: qk.part(id),
+      queryFn: async () => m.mapPart(await api.parts.get(id)),
+      enabled: !!id,
+      staleTime: 60_000,
+    })),
+  });
+  const byPart = new Map<string, import("@/types").Supplier[]>();
+  partIds.forEach((id, i) => byPart.set(id, results[i]?.data?.preferredVendors ?? []));
+  return { byPart, isLoading: results.some((r) => r.isLoading) };
+}
 
 export function useCreatePart() {
   const qc = useQueryClient();

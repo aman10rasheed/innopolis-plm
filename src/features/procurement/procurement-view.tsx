@@ -35,6 +35,8 @@ import {
   usePoReceipts,
   useVendors,
   useBoms,
+  useBom,
+  usePreferredVendorsByPart,
   useCategories,
   useWarehouses,
   toNumber,
@@ -45,6 +47,7 @@ import type {
   Rfq,
   Quotation,
   PoStatus,
+  Supplier,
 } from "@/types";
 import { useUIStore } from "@/stores/ui-store";
 import { ensureCanCreate } from "@/auth/permissions";
@@ -467,11 +470,36 @@ function GenerateRfqDialog({
   const [vendorIds, setVendorIds] = React.useState<Set<string>>(new Set());
   const createRfq = useCreateRfq();
 
+  const [showAllVendors, setShowAllVendors] = React.useState(false);
+
   const bomsQuery = useBoms();
   // Only BOMs that actually have lines can seed an RFQ (server rejects empty ones).
   const boms = (bomsQuery.data?.items ?? []).filter((b) => b.lineItems > 0);
-  const vendors = useVendors().data?.items ?? [];
+  const allVendors = useVendors().data?.items ?? [];
   const categories = useCategories().data ?? [];
+
+  // Selected BOM's line items + each material's preferred vendors (from the
+  // material master, which allows several vendors per material).
+  const bomDetail = useBom(bomId);
+  const lines = React.useMemo(() => bomDetail.data?.lines ?? [], [bomDetail.data]);
+  const uniquePartIds = React.useMemo(
+    () => [...new Set(lines.map((l) => l.part_id))],
+    [lines],
+  );
+  const { byPart: vendorsByPart, isLoading: vendorsLoading } =
+    usePreferredVendorsByPart(uniquePartIds);
+
+  // The vendors relevant to THIS BOM = union of its materials' preferred vendors.
+  const bomVendors = React.useMemo(() => {
+    const map = new Map<string, Supplier>();
+    for (const list of vendorsByPart.values()) for (const v of list) map.set(v.id, v);
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [vendorsByPart]);
+
+  // Show the BOM's own vendors by default; fall back to the full directory only
+  // if the user asks (or if none of the materials have preferred vendors).
+  const scopedVendors = bomVendors.length > 0 && !showAllVendors ? bomVendors : allVendors;
+  const vendorsAreScoped = bomId && bomVendors.length > 0 && !showAllVendors;
 
   // reset the form each time the dialog opens
   React.useEffect(() => {
@@ -481,8 +509,17 @@ function GenerateRfqDialog({
       setBomId("");
       setCategory("");
       setVendorIds(new Set());
+      setShowAllVendors(false);
     }
   }, [open]);
+
+  // When the BOM's preferred vendors resolve, pre-select them so the user starts
+  // from "quote every material's preferred vendors" rather than an empty list.
+  React.useEffect(() => {
+    if (!bomId || vendorsLoading) return;
+    setVendorIds(new Set(bomVendors.map((v) => v.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bomId, vendorsLoading]);
 
   const toggleVendor = (id: string) =>
     setVendorIds((prev) => {
@@ -568,15 +605,87 @@ function GenerateRfqDialog({
             )}
           </div>
 
+          {/* Line items of the selected BOM, each with its material's preferred vendors */}
+          {bomId && (
+            <div className="space-y-1">
+              <span className="text-2xs font-medium text-muted-foreground">
+                Line items ({lines.length})
+              </span>
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-border">
+                {vendorsLoading ? (
+                  <div className="px-3 py-4 text-center text-2xs text-muted-foreground">Loading materials…</div>
+                ) : lines.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-2xs text-muted-foreground">This BOM has no line items.</div>
+                ) : (
+                  lines.map((l) => {
+                    const lineVendors = vendorsByPart.get(l.part_id) ?? [];
+                    return (
+                      <div
+                        key={l.id}
+                        className="flex items-start gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium">{l.name}</p>
+                          <p className="font-mono text-2xs text-muted-foreground">
+                            {l.part_number} · qty {toNumber(l.quantity)}
+                          </p>
+                        </div>
+                        <div className="flex max-w-[55%] flex-wrap justify-end gap-1">
+                          {lineVendors.length === 0 ? (
+                            <span className="text-2xs italic text-muted-foreground/70">no preferred vendor</span>
+                          ) : (
+                            lineVendors.map((v) => (
+                              <button
+                                key={v.id}
+                                type="button"
+                                onClick={() => toggleVendor(v.id)}
+                                title={vendorIds.has(v.id) ? "Selected — click to remove" : "Click to add to RFQ"}
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-2xs transition-colors",
+                                  vendorIds.has(v.id)
+                                    ? "border-primary/50 bg-primary/10 text-primary"
+                                    : "border-border text-muted-foreground hover:bg-accent/40",
+                                )}
+                              >
+                                {v.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1">
-            <span className="text-2xs font-medium text-muted-foreground">
-              Vendors ({vendorIds.size} selected)
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-2xs font-medium text-muted-foreground">
+                Vendors ({vendorIds.size} selected)
+                {vendorsAreScoped && <span className="ml-1 font-normal text-muted-foreground/70">· from this BOM's materials</span>}
+              </span>
+              {bomId && bomVendors.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllVendors((s) => !s)}
+                  className="text-2xs font-medium text-primary hover:underline"
+                >
+                  {showAllVendors ? "Show BOM vendors only" : "Show all vendors"}
+                </button>
+              )}
+            </div>
             <div className="max-h-36 overflow-y-auto rounded-lg border border-border">
-              {vendors.length === 0 ? (
-                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">No vendors available</div>
+              {!bomId ? (
+                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">Select a source BOM to see its materials' vendors.</div>
+              ) : scopedVendors.length === 0 ? (
+                <div className="px-3 py-4 text-center text-2xs text-muted-foreground">
+                  No preferred vendors on these materials.{" "}
+                  <button type="button" onClick={() => setShowAllVendors(true)} className="font-medium text-primary hover:underline">Show all vendors</button>
+                </div>
               ) : (
-                vendors.map((v) => (
+                scopedVendors.map((v) => (
                   <label
                     key={v.id}
                     className="flex cursor-pointer items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0 hover:bg-accent/40"
@@ -1239,17 +1348,29 @@ function PoDetailDialog({
                   </div>
                   <div className="max-h-44 divide-y divide-border overflow-auto">
                     {grns.map((g) => (
-                      <div key={g.grn_number} className="px-3 py-2 text-[13px]">
-                        <div className="flex items-baseline justify-between gap-2">
+                      <div key={g.id} className="px-3 py-2 text-[13px]">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="font-mono font-medium">{g.grn_number}</span>
-                          <span className="text-2xs text-muted-foreground">
-                            {formatDate(g.received_at)} · {g.received_by_name}
+                          <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                            {formatDate(g.received_at)}
+                            <Avatar className="size-4">
+                              <AvatarFallback
+                                className="text-[7px]"
+                                style={{
+                                  background: `hsl(${g.received_by_hue ?? 210} 55% 22%)`,
+                                  color: `hsl(${g.received_by_hue ?? 210} 80% 76%)`,
+                                }}
+                              >
+                                {g.received_by_initials ?? "?"}
+                              </AvatarFallback>
+                            </Avatar>
+                            {g.received_by_name ?? "Unknown user"}
                           </span>
                         </div>
                         {g.note && <p className="mt-0.5 text-2xs text-muted-foreground">{g.note}</p>}
                         <div className="mt-1 space-y-0.5">
-                          {g.lines.map((l, i) => (
-                            <div key={i} className="flex justify-between gap-2 text-2xs text-muted-foreground">
+                          {g.lines.map((l) => (
+                            <div key={l.po_line_id} className="flex justify-between gap-2 text-2xs text-muted-foreground">
                               <span className="truncate font-mono">
                                 {l.part_number}
                                 {l.batch ? ` · ${l.batch}` : ""}
