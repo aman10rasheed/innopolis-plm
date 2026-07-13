@@ -12,7 +12,7 @@ import type {
   ApiProject,
   ApiBom, ApiBomDetail, ApiBomLine, ApiBomLineInput, ApiBomAnalysis,
   ApiRfq, ApiRfqDetail, ApiQuotation, ApiComparison,
-  ApiPurchaseOrder, ApiPoDetail,
+  ApiPurchaseOrder, ApiPoDetail, ApiGrn,
   ApiWarehouse, ApiWarehouseDetail, ApiInventoryBalance, ApiMovement,
   ApiDashboard,
 } from "./types";
@@ -160,9 +160,15 @@ export const api = {
     create: (body: Record<string, unknown>) => req<ApiPurchaseOrder>("/purchase-orders", { method: "POST", body }),
     setStatus: (id: string, status: PoStatus) =>
       req<ApiPurchaseOrder>(`/purchase-orders/${id}/status`, { method: "POST", body: { status } }),
-    /** Goods receipt. warehouse_id REQUIRED; received_qty is GROSS (accepted + rejected). */
-    receive: (id: string, body: { warehouse_id: string; lines: { po_line_id: string; received_qty: number; rejected_qty?: number; batch?: string }[] }) =>
+    /**
+     * Goods receipt. warehouse_id REQUIRED; received_qty is GROSS (accepted +
+     * rejected) for THIS delivery only — the backend (v1.0.2+) accumulates
+     * deltas onto the line. Never send the running total.
+     */
+    receive: (id: string, body: { warehouse_id: string; note?: string; lines: { po_line_id: string; received_qty: number; rejected_qty?: number; batch?: string }[] }) =>
       req<ApiPoDetail>(`/purchase-orders/${id}/receive`, { method: "POST", body }),
+    /** Delivery history — one GRN per receipt, newest first. */
+    receipts: (id: string) => req<ApiGrn[]>(`/purchase-orders/${id}/receipts`),
     remove: (id: string) => req<void>(`/purchase-orders/${id}`, { method: "DELETE" }),
   },
 

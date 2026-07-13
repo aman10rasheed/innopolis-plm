@@ -32,6 +32,7 @@ import {
   usePurchaseOrder,
   useSetPoStatus,
   useReceivePo,
+  usePoReceipts,
   useVendors,
   useBoms,
   useCategories,
@@ -1141,9 +1142,11 @@ function PoDetailDialog({
   onClose: () => void;
 }) {
   const detail = usePurchaseOrder(poId ?? "");
+  const receipts = usePoReceipts(poId ?? "");
   const setStatus = useSetPoStatus();
   const receive = useReceivePo();
   const po = detail.data;
+  const grns = receipts.data ?? [];
   const [receiveOpen, setReceiveOpen] = React.useState(false);
 
   const advance = async () => {
@@ -1228,6 +1231,42 @@ function PoDetailDialog({
                 </div>
               )}
 
+              {/* Delivery history — one GRN per (partial) receipt */}
+              {grns.length > 0 && (
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <div className="border-b border-border bg-surface/80 px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Deliveries ({grns.length})
+                  </div>
+                  <div className="max-h-44 divide-y divide-border overflow-auto">
+                    {grns.map((g) => (
+                      <div key={g.grn_number} className="px-3 py-2 text-[13px]">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-mono font-medium">{g.grn_number}</span>
+                          <span className="text-2xs text-muted-foreground">
+                            {formatDate(g.received_at)} · {g.received_by_name}
+                          </span>
+                        </div>
+                        {g.note && <p className="mt-0.5 text-2xs text-muted-foreground">{g.note}</p>}
+                        <div className="mt-1 space-y-0.5">
+                          {g.lines.map((l, i) => (
+                            <div key={i} className="flex justify-between gap-2 text-2xs text-muted-foreground">
+                              <span className="truncate font-mono">
+                                {l.part_number}
+                                {l.batch ? ` · ${l.batch}` : ""}
+                              </span>
+                              <span className="shrink-0 tabular">
+                                +{toNumber(l.accepted_qty)}
+                                {toNumber(l.rejected_qty) > 0 ? ` · ${toNumber(l.rejected_qty)} rejected` : ""}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <DialogFooter>
                 {nextStatus && (
                   <Button
@@ -1279,6 +1318,7 @@ function ReceiveGoodsDialog({
   const warehousesQuery = useWarehouses();
   const warehouses = warehousesQuery.data ?? [];
   const [warehouseId, setWarehouseId] = React.useState("");
+  const [note, setNote] = React.useState("");
 
   // lines with anything left to receive, with editable qty / rejected / batch
   const outstanding = React.useMemo(
@@ -1301,6 +1341,7 @@ function ReceiveGoodsDialog({
         ]),
       ),
     );
+    setNote("");
     setWarehouseId((prev) => prev || warehouses[0]?.id || "");
   }, [open, outstanding, warehouses]);
 
@@ -1328,12 +1369,14 @@ function ReceiveGoodsDialog({
         id: po.id,
         body: {
           warehouse_id: warehouseId,
+          note: note.trim() || undefined,
           lines: parsed
             .filter((p) => p.qty > 0 || p.rejected > 0)
             .map((p) => ({
               po_line_id: p.line.id,
-              // API semantics: received_qty is gross (accepted + rejected);
-              // the backend books received_qty − rejected_qty into stock.
+              // API semantics: received_qty is gross (accepted + rejected) for
+              // THIS delivery only — the backend accumulates deltas onto the
+              // line and books received_qty − rejected_qty into stock.
               received_qty: p.qty + p.rejected,
               rejected_qty: p.rejected > 0 ? p.rejected : undefined,
               batch: p.row.batch.trim() || undefined,
@@ -1359,7 +1402,8 @@ function ReceiveGoodsDialog({
         <DialogHeader>
           <DialogTitle>Receive goods</DialogTitle>
           <DialogDescription>
-            Book a receipt against {po.number} — pick the warehouse the stock goes into.
+            Book a delivery against {po.number} — enter only what arrived in this
+            delivery; the remaining balance updates automatically.
           </DialogDescription>
         </DialogHeader>
 
@@ -1380,11 +1424,20 @@ function ReceiveGoodsDialog({
             </Select>
           </label>
 
+          <label className="block space-y-1">
+            <span className="text-2xs font-medium text-muted-foreground">Delivery note (optional)</span>
+            <Input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Courier LR-88213"
+            />
+          </label>
+
           <div className="overflow-hidden rounded-xl border border-border">
             <div className="grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.9fr] items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
               <span>Material</span>
-              <span className="text-right">Open</span>
-              <span className="text-right">Accept</span>
+              <span className="text-right">Remaining</span>
+              <span className="text-right">Receive now</span>
               <span className="text-right">Reject</span>
               <span>Batch</span>
             </div>

@@ -302,6 +302,9 @@ export const usePurchaseOrders = (filters?: Query) =>
   });
 export const usePurchaseOrder = (id: string) =>
   useQuery({ queryKey: qk.po(id), queryFn: () => api.pos.get(id), enabled: !!id });
+/** GRN delivery history for a PO (invalidated together with qk.po after a receipt). */
+export const usePoReceipts = (id: string) =>
+  useQuery({ queryKey: [...qk.po(id), "receipts"], queryFn: () => api.pos.receipts(id), enabled: !!id });
 export function useSetPoStatus() {
   const qc = useQueryClient();
   return useMutation({

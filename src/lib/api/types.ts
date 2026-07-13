@@ -418,6 +418,23 @@ export interface ApiPurchaseOrder {
 export interface ApiPoLine { id: UUID; po_id: UUID; part_id: UUID; part_number: string; name: string; quantity: Num; unit_price: Num; extended: Num; received_qty: Num; rejected_qty: Num }
 export interface ApiPoDetail extends ApiPurchaseOrder { lines: ApiPoLine[] }
 
+/** One line of a Goods Receipt Note (per-delivery quantities, not cumulative). */
+export interface ApiGrnLine {
+  part_number: string;
+  received_qty: Num;
+  rejected_qty: Num;
+  accepted_qty: Num;
+  batch: string;
+}
+/** A Goods Receipt Note — one record per delivery (GET /purchase-orders/:id/receipts). */
+export interface ApiGrn {
+  grn_number: string;
+  received_at: string;
+  received_by_name: string;
+  note: string;
+  lines: ApiGrnLine[];
+}
+
 /* ---- Inventory ---- */
 export interface ApiWarehouse {
   id: UUID;
