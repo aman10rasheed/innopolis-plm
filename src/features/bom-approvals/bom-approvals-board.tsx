@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Building2,
@@ -14,6 +15,7 @@ import {
   Eye,
   ArrowRightLeft,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import {
   useBoms,
@@ -268,6 +270,7 @@ function BomEditDrawer({
   onMove: (stage: BomStage) => void;
   onDelete: () => void;
 }) {
+  const router = useRouter();
   const [form, setForm] = React.useState<ProjectBom | null>(bom);
   React.useEffect(() => setForm(bom), [bom]);
 
@@ -307,6 +310,14 @@ function BomEditDrawer({
                 </div>
                 <h2 className="mt-1 text-base font-semibold">{form.projectName}</h2>
                 <p className="text-xs text-muted-foreground">{form.projectNumber} · {form.customer}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2.5"
+                  onClick={() => router.push(`/bom?p=${form.projectId}`)}
+                >
+                  <ExternalLink className="size-3.5" /> Open in BOM Explorer
+                </Button>
               </div>
               <Button variant="ghost" size="icon-sm" onClick={onClose}><X className="size-4" /></Button>
             </div>

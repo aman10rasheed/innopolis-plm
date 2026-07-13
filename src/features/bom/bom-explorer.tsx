@@ -82,6 +82,14 @@ const LEVEL_COLORS = [
 export function BomExplorer() {
   const [rootId, setRootId] = React.useState<string | null>(null);
 
+  // Deep link: /bom?p=<projectId> opens that project's BOM directly
+  // (used by the BOM Approvals drawer). Read from window.location — no
+  // useSearchParams under static export.
+  React.useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("p");
+    if (p) setRootId(p);
+  }, []);
+
   // The add-component dialog lives inside a BOM document view; on the project
   // picker the header button has nothing to open — explain instead of no-op.
   const addComponentOpen = useUIStore((s) => s.bomAddComponentOpen);
